@@ -1,6 +1,9 @@
+library(RSAGA)
+library(exactextractr)
 library(tidyverse)
 library(sf)
 library(terra)
+
 
 su_els <- read_sf("input/su_els_apaneca.shp")
 ls <- read_sf("input/landslides_test.shp")
@@ -13,4 +16,17 @@ plot(ls, add=TRUE)
 su_ls <- sum(su_els$contains_point == 1)
 su_nols <- length(su_els$contains_point)-su_ls
 
- 
+#path to SAGA executable
+env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+
+dem <- rast("input/dem.tif")
+writeRaster(dem, "input/dem.sdat", overwrite=TRUE)
+
+rsaga.slope.asp.curv(in.dem = "input/dem.sdat", out.slope = "input/slope",
+                     out.cprof = "input/cprof", out.cplan = "input/cplan",
+                     method = "poly2zevenbergen",
+                     env = env)
+
+vars <- map(list.files("input", pattern="*.sdat$", full.names = T), rast)
+
+mean_vars <- pmap(list(vars, su_els), terra::extract)
