@@ -31,7 +31,7 @@ rsaga.slope.asp.curv(in.dem = "input/dem.sdat", out.slope = "input/slope",
 
 
 
-vars <- map(list.files("input", pattern="*.sdat$", full.names = T), rast)
+vars <- map(list.files("input/test", pattern="*.sdat$", full.names = T), rast)
 
 su_vars <- exact_extract(rast(vars), su_els, 'mean')
 
