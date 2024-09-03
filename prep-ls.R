@@ -13,37 +13,38 @@ library(earth)
 
 memory.limit(800000)
 
+#path to SAGA executable
+env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+
 #number of replications
 n <- 10
 
 #Slope units
-su_els <- read_sf("input/su_els_apaneca.shp") 
+su_els <- read_sf("input/su/su_els_apaneca.shp") 
 #Landslides
-ls <- read_sf("input/landslides_test.shp")
+ls <- read_sf("input/landslides/landslides_test.shp")
+
+dem <- rast("input/continuous/dem.tif")
 
 #Checks if at least one landslide is inside a slope unit
 su_els$frane <- lengths(st_intersects(su_els, ls)) > 0
 su_els$frane <- as.integer(su_els$frane == "TRUE")
 
-#path to SAGA executable
-#env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
-#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+writeRaster(dem, "input/continuous/dem.sdat", overwrite=TRUE)
 
-# dem <- rast("input/dem.tif") 
-# 
-# writeRaster(dem, "input/dem.sdat", overwrite=TRUE)
-# 
-# rsaga.slope.asp.curv(in.dem = "input/dem.sdat", out.slope = "input/slope",
-#                      out.cprof = "input/cprof", out.cplan = "input/cplan",
-#                      method = "poly2zevenbergen",
-#                      env = env)
+rsaga.slope.asp.curv(in.dem = "input/continuous/dem.sdat", out.slope = "input/continuous/slope",
+                     out.cprof = "input/continuous/cprof", out.cplan = "input/continuous/cplan",
+                     out.aspect = "input/discrete/asp.dat", unit.aspect = 1,
+                     method = "poly2zevenbergen",
+                     env = env)
 
 #Continuous variables
-vars_cont <- map(list.files("input/apaneca_cont/", pattern="*.sdat$", full.names = T), rast)
+vars_cont <- map(list.files("input/continuous/", pattern="*.sdat$", full.names = T), rast)
 su_vars_cont <- exact_extract(rast(vars_cont), su_els, c('median', 'stdev'))
 
 #Discrete variables
-vars_disc <- map(list.files("input/apaneca_disc/", pattern="*.sdat$", full.names = T), rast)
+vars_disc <- map(list.files("input/discrete/", pattern="*.sdat$", full.names = T), rast)
 su_vars_disc <- exact_extract(rast(vars_disc), su_els, 'majority')
 
 su_model <- data.frame(cbind(su_els, su_vars_cont)) |> dplyr::select(-c(geometry, gridcode)) 
