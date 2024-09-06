@@ -24,7 +24,7 @@ n <- 10
 su_els <- read_sf("input/su/su_els_apaneca.shp") 
 #Landslides
 ls <- read_sf("input/landslides/landslides_test.shp")
-
+#DEM
 dem <- rast("input/continuous/dem.tif")
 
 #Checks if at least one landslide is inside a slope unit
@@ -33,11 +33,25 @@ su_els$frane <- as.integer(su_els$frane == "TRUE")
 
 writeRaster(dem, "input/continuous/dem.sdat", overwrite=TRUE)
 
-rsaga.slope.asp.curv(in.dem = "input/continuous/dem.sdat", out.slope = "input/continuous/slope",
+rsaga.slope.asp.curv(in.dem = "input/continuous/dem.sdat", 
+                     out.slope = "input/continuous/slope", unit.slope = 1,
                      out.cprof = "input/continuous/cprof", out.cplan = "input/continuous/cplan",
                      out.aspect = "input/discrete/asp.dat", unit.aspect = 1,
                      method = "poly2zevenbergen",
                      env = env)
+
+asp <- rast("input/discrete/asp.dat")
+m <- c(0, 22.5, 1,
+       22.5, 67.5, 2,
+       67.5, 112.5, 3,
+       112.5, 157.5, 4,
+       157.5, 202.5, 5,
+       202.5, 247.5, 6,
+       247.5, 292.5, 7,
+       292.5, 337.5, 8,
+       337.5, 360, 1)
+rcl <- matrix(m, ncol=3, byrow=TRUE)
+asp <- terra::classify(asp, rcl)
 
 #Continuous variables
 vars_cont <- map(list.files("input/continuous/", pattern="*.sdat$", full.names = T), rast)
