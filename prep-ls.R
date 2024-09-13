@@ -10,6 +10,7 @@ library(caret)
 library(ROCR)
 library(sperrorest)
 library(earth)
+library(units)
 
 memory.limit(800000)
 
@@ -20,25 +21,58 @@ env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
 #number of replications
 n <- 10
 
+##Read data
+
 #Slope units
-su <- read_sf("input/su/su_san_vicente.shp") 
+su <- read_sf("input/su/su_els_apaneca.shp") 
 #Landslides
-ls <- read_sf("input/landslides/san_vicente.shp") %>%
-  dplyr::filter(Evento != "Sismo")
+# ls_pol <- read_sf("input/landslides/san_vicente.shp") %>%
+#   dplyr::filter(Evento != "Sismo") %>% st_transform(crs(su))
+ls_point <- read_sf("input/landslides/landslide_test.shp") 
+
+# #Plot of su and landslides
+# ggplot()+geom_sf(data = su, fill=NA)+geom_sf(data=ls_pol, fill="red", color=NA)+theme_bw()
 
 #DEM
-dem <- rast("input/continuous/dem.tif")
+dem <- rast("input/continuous/apaneca/dem.tif")
 
 #Checks if at least one landslide is inside a slope unit
 su$frane <- lengths(st_intersects(su, ls)) > 0
 su$frane <- as.integer(su$frane == "TRUE")
 
+# #Landslides as polygons
+# #Checks if polygons area is at least 0.1% of a slope unit as used by Goddard et al (2023) based on the 
+# #results by Jacobs et al. (2023)
+# su <- su %>% dplyr::mutate(area_su = st_area(su))
+# 
+# #https://gis.stackexchange.com/a/397962/36679
+# su_ls <- st_intersection(ls_pol,su)
+# 
+# su_ls <- su_ls %>%
+#   dplyr::mutate(area_ls = st_area(su_ls)) %>% 
+#   st_drop_geometry() %>%
+#   group_by(DN) %>% 
+#   summarise(area_ls = sum(area_ls))
+#   
+# su_ls <- left_join(su, su_ls) %>%
+#   st_drop_geometry() %>%
+#   dplyr::mutate(ls_area_su = area_ls/area_su*100) %>%
+#   drop_units() %>%
+#   dplyr::mutate(su_ls = ifelse(ls_area_su >= 0.1 & !is.na(ls_area_su), 1,0)) %>%
+#   dplyr::select(DN, su_ls)
+#   
+# su_ls <- left_join(su, su_ls)
+# 
+# #Plot of su and landslides
+# ggplot()+geom_sf(data = su_ls, aes(fill=factor(su_ls)))+geom_sf(data=ls_pol, fill="red", color=NA)+theme_bw()
+  
+
 writeRaster(dem, "input/continuous/dem.sdat", overwrite=TRUE)
 
-rsaga.slope.asp.curv(in.dem = "input/continuous/dem.sdat", 
-                     out.slope = "input/continuous/slope", unit.slope = 1,
-                     out.cprof = "input/continuous/cprof", out.cplan = "input/continuous/cplan",
-                     out.aspect = "input/discrete/asp.dat", unit.aspect = 1,
+rsaga.slope.asp.curv(in.dem = "input/continuous/apaneca/dem.sdat", 
+                     out.slope = "input/continuous/apaneca/slope", unit.slope = 1,
+                     out.cprof = "input/continuous/apaneca/cprof", out.cplan = "input/continuous/apaneca/cplan",
+                     out.aspect = "input/discrete/apaneca/asp.dat", unit.aspect = 1,
                      method = "poly2zevenbergen",
                      env = env)
 
@@ -56,7 +90,7 @@ rcl <- matrix(m, ncol=3, byrow=TRUE)
 asp <- terra::classify(asp, rcl)
 
 #Continuous variables
-vars_cont <- map(list.files("input/continuous/", pattern="*.sdat$", full.names = T), rast)
+vars_cont <- map(list.files("input/continuous/apaneca/", pattern="*.sdat$", full.names = T), rast)
 su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'))
 
 #Discrete variables
