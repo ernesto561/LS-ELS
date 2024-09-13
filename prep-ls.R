@@ -21,15 +21,17 @@ env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
 n <- 10
 
 #Slope units
-su_els <- read_sf("input/su/su_els_apaneca.shp") 
+su <- read_sf("input/su/su_san_vicente.shp") 
 #Landslides
-ls <- read_sf("input/landslides/landslides_test.shp")
+ls <- read_sf("input/landslides/san_vicente.shp") %>%
+  dplyr::filter(Evento != "Sismo")
+
 #DEM
 dem <- rast("input/continuous/dem.tif")
 
 #Checks if at least one landslide is inside a slope unit
-su_els$frane <- lengths(st_intersects(su_els, ls)) > 0
-su_els$frane <- as.integer(su_els$frane == "TRUE")
+su$frane <- lengths(st_intersects(su, ls)) > 0
+su$frane <- as.integer(su$frane == "TRUE")
 
 writeRaster(dem, "input/continuous/dem.sdat", overwrite=TRUE)
 
@@ -55,13 +57,13 @@ asp <- terra::classify(asp, rcl)
 
 #Continuous variables
 vars_cont <- map(list.files("input/continuous/", pattern="*.sdat$", full.names = T), rast)
-su_vars_cont <- exact_extract(rast(vars_cont), su_els, c('median', 'stdev'))
+su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'))
 
 #Discrete variables
 vars_disc <- map(list.files("input/discrete/", pattern="*.sdat$", full.names = T), rast)
-su_vars_disc <- exact_extract(rast(vars_disc), su_els, 'majority')
+su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority')
 
-su_model <- data.frame(cbind(su_els, su_vars_cont)) |> dplyr::select(-c(geometry, gridcode)) 
+su_model <- data.frame(cbind(su, su_vars_cont)) |> dplyr::select(-c(geometry, gridcode)) 
 
 all<-data.frame(su_model)
 
