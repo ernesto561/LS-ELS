@@ -11,6 +11,7 @@ library(ROCR)
 library(sperrorest)
 library(earth)
 library(units)
+library(dismo)
 
 memory.limit(800000)
 
@@ -69,7 +70,7 @@ su$frane <- as.integer(su$frane == "TRUE")
 # #Plot of su and landslides
 # ggplot()+geom_sf(data = su_ls, aes(fill=factor(su_ls)))+geom_sf(data=ls_pol, fill="red", color=NA)+theme_bw()
   
-writeRaster(dem, paste0("input/continuous", area, "/dem.sdat"), overwrite=TRUE)
+writeRaster(dem, paste0("input/continuous/", area, "/dem.sdat"), overwrite=TRUE)
 
 rsaga.slope.asp.curv(in.dem = paste0("input/continuous/", area, "/dem.sdat"), 
                      out.slope = paste0("input/continuous/", area, "/slope"), unit.slope = 1,
@@ -81,11 +82,11 @@ rsaga.slope.asp.curv(in.dem = paste0("input/continuous/", area, "/dem.sdat"),
 rsaga.geoprocessor(lib = "ta_morphometry", 
                    module = "TPI Based Landform Classification",
                    param = list(DEM = paste0("input/continuous/", area, "/dem.sdat"), 
-                                LANDFORMS = paste0("input/discrete/", area, "/lcl.sdat")),
+                                LANDFORMS = paste0("input/discrete/", area, "/lcl.sdat"),
                                 RADIUS_A_MIN = 0, 
                                 RADIUS_A_MAX = 100,
                                 RADIUS_B_MIN = 0,
-                                RADIUS_B_MAX = 1000,
+                                RADIUS_B_MAX = 1000),
                                 env = env)
 
 asp <- rast(paste0("input/discrete/", area, "/asp.sdat"))
@@ -103,14 +104,14 @@ asp <- terra::classify(asp, rcl)
 writeRaster(asp, paste0("input/discrete/", area, "/asp.sdat"), overwrite=TRUE)
 
 #Continuous variables
-vars_cont <- map(list.files("input/continuous/apaneca/", pattern="*.sdat$", full.names = T), rast)
+vars_cont <- map(list.files(paste0("input/continuous/", area, "/"), pattern="*.sdat$", full.names = T), rast)
 su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'))
 
 #Discrete variables
-vars_disc <- map(list.files("input/discrete/", pattern="*.sdat$", full.names = T), rast)
+vars_disc <- map(list.files(paste0("input/discrete/", area, "/"), pattern="*.sdat$", full.names = T), rast)
 su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority')
 
-su_model <- data.frame(cbind(su, su_vars_cont)) |> dplyr::select(-c(geometry, gridcode)) 
+su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc)) |> dplyr::select(-c(geometry, gridcode)) 
 
 all<-data.frame(su_model)
 
@@ -125,6 +126,35 @@ vif(vif_test)
 sink() 
 
 all$frane<-as.factor(all$frane)
+
+##########################
+#Maxent modeling
+##########################
+all_maxent <- all %>% 
+  dplyr::select(-c(Id)) %>%
+  dplyr::rename(RV=frane) %>%
+  mutate_at(c('RV'), ~na_if(., 0))
+
+all_maxentDVs <- deriveVars(all_maxent, 
+                           transformtype = c("L","M","D","B"))
+
+all_maxentDVselect <- selectDVforEV(all_maxentDVs$dvdata, alpha = 0.001, quiet = TRUE)
+all_maxentEVselect <- selectEV(all_maxentDVselect$dvdata, alpha = 0.001, interaction = TRUE)
+
+all_maxent_model <- chooseModel(all_maxentDVselect$dvdata, 
+                                formula("~ median.cplan + median.cprof + median.dem + median.slope + 
+    stdev.cprof + stdev.dem + stdev.slope"))
+
+all_m <- all
+
+all_maxent_modelPreds <- projectModel(model = all_maxent_model,
+                               transformations = all_maxentDVs$transformations,
+                               data = all_m)
+
+all_maxentfinal <- left_join(su, all_maxent_modelPreds$output)
+sf::st_write(all_maxentfinal, "salida/su_apa_maxent.shp", append = FALSE)
+
+#MARS modeling
 
 pos_all<-all[which(all$frane=="1"),]
 
@@ -383,11 +413,10 @@ for(i  in 1:n){
   all_map[,i]<-predict(mars_all[[i]], all, type=c("response"))
 }
 
-
 all_map_avg <-apply(all_map,1, mean)
 all_map_avg<- round(all_map_avg, digits=4)
 
 all_map_data<-data.frame(Id=all$Id,score=all_map_avg)
 
-su_map = left_join(su_els, all_map_data)
+su_map = left_join(su, all_map_data)
 sf::st_write(su_map, "salida/su_apa_mean_sd.shp", append = FALSE)
