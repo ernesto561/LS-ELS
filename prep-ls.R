@@ -23,21 +23,24 @@ n <- 10
 
 ##Read data
 
+#folder name
+area <- "apaneca"
+
 #Slope units
 su <- read_sf("input/su/su_els_apaneca.shp") 
 #Landslides
 # ls_pol <- read_sf("input/landslides/san_vicente.shp") %>%
 #   dplyr::filter(Evento != "Sismo") %>% st_transform(crs(su))
-ls_point <- read_sf("input/landslides/landslide_test.shp") 
+ls_point <- read_sf("input/landslides/landslides_test.shp") 
 
 # #Plot of su and landslides
 # ggplot()+geom_sf(data = su, fill=NA)+geom_sf(data=ls_pol, fill="red", color=NA)+theme_bw()
 
 #DEM
-dem <- rast("input/continuous/apaneca/dem.tif")
+dem <- rast(paste0("input/continuous/", area, "/dem.tif"))
 
 #Checks if at least one landslide is inside a slope unit
-su$frane <- lengths(st_intersects(su, ls)) > 0
+su$frane <- lengths(st_intersects(su, ls_point)) > 0
 su$frane <- as.integer(su$frane == "TRUE")
 
 # #Landslides as polygons
@@ -66,17 +69,26 @@ su$frane <- as.integer(su$frane == "TRUE")
 # #Plot of su and landslides
 # ggplot()+geom_sf(data = su_ls, aes(fill=factor(su_ls)))+geom_sf(data=ls_pol, fill="red", color=NA)+theme_bw()
   
+writeRaster(dem, paste0("input/continuous", area, "/dem.sdat"), overwrite=TRUE)
 
-writeRaster(dem, "input/continuous/dem.sdat", overwrite=TRUE)
-
-rsaga.slope.asp.curv(in.dem = "input/continuous/apaneca/dem.sdat", 
-                     out.slope = "input/continuous/apaneca/slope", unit.slope = 1,
-                     out.cprof = "input/continuous/apaneca/cprof", out.cplan = "input/continuous/apaneca/cplan",
-                     out.aspect = "input/discrete/apaneca/asp.dat", unit.aspect = 1,
+rsaga.slope.asp.curv(in.dem = paste0("input/continuous/", area, "/dem.sdat"), 
+                     out.slope = paste0("input/continuous/", area, "/slope"), unit.slope = 1,
+                     out.cprof = paste0("input/continuous/", area, "/cprof"), out.cplan = paste0("input/continuous/", area, "/cplan"),
+                     out.aspect = paste0("input/discrete/", area, "/asp.dat"), unit.aspect = 1,
                      method = "poly2zevenbergen",
                      env = env)
 
-asp <- rast("input/discrete/asp.dat")
+rsaga.geoprocessor(lib = "ta_morphometry", 
+                   module = "TPI Based Landform Classification",
+                   param = list(DEM = paste0("input/continuous/", area, "/dem.sdat"), 
+                                LANDFORMS = paste0("input/discrete/", area, "/lcl.sdat")),
+                                RADIUS_A_MIN = 0, 
+                                RADIUS_A_MAX = 100,
+                                RADIUS_B_MIN = 0,
+                                RADIUS_B_MAX = 1000,
+                                env = env)
+
+asp <- rast(paste0("input/discrete/", area, "/asp.sdat"))
 m <- c(0, 22.5, 1,
        22.5, 67.5, 2,
        67.5, 112.5, 3,
@@ -88,6 +100,7 @@ m <- c(0, 22.5, 1,
        337.5, 360, 1)
 rcl <- matrix(m, ncol=3, byrow=TRUE)
 asp <- terra::classify(asp, rcl)
+writeRaster(asp, paste0("input/discrete/", area, "/asp.sdat"), overwrite=TRUE)
 
 #Continuous variables
 vars_cont <- map(list.files("input/continuous/apaneca/", pattern="*.sdat$", full.names = T), rast)
