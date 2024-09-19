@@ -12,6 +12,7 @@ library(sperrorest)
 library(earth)
 library(units)
 library(dismo)
+library(MIAmaxent)
 
 memory.limit(800000)
 
