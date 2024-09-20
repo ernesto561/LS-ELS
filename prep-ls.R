@@ -13,6 +13,7 @@ library(earth)
 library(units)
 library(dismo)
 library(MIAmaxent)
+library(ENMeval)
 
 memory.limit(800000)
 
@@ -33,7 +34,7 @@ su <- read_sf("input/su/SU_ELS_LCC.shp")
 #Landslides
 # ls_pol <- read_sf("input/landslides/san_vicente.shp") %>%
 #   dplyr::filter(Evento != "Sismo") %>% st_transform(crs(su))
-ls_point <- read_sf("input/landslides/landslides_test.shp") 
+ls_point <- read_sf("input/landslides/landslides_test_lcc.shp") 
 
 # #Plot of su and landslides
 # ggplot()+geom_sf(data = su, fill=NA)+geom_sf(data=ls_pol, fill="red", color=NA)+theme_bw()
@@ -43,7 +44,7 @@ ls_point <- read_sf("input/landslides/landslides_test.shp")
 
 #Checks if at least one landslide is inside a slope unit
 su$frane <- lengths(st_intersects(su, ls_point)) > 0
-su$frane <- as.integer(su$frane == "TRUE")
+su$frane <- as.integer(ifelse(su$frane == "TRUE", 1, 0))
 
 # #Landslides as polygons
 # #Checks if polygons area is at least 0.1% of a slope unit as used by Goddard et al (2023) based on the 
@@ -109,15 +110,23 @@ ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.05)+theme_bw()
 ## Slope unit analysis
 ################################
 
+crs_els <- st_crs(su)
+#Set crs for all rasters
+# read_r <- function(x){r <- rast(x)
+#                       crs(r)<-crs$wkt
+#                       return(r)}
+
+read_r <- function(x){r <- rast(x);crs(r)<-crs_els$wkt;return(r)}
+
 #Continuous variables
-vars_cont <- map(list.files(paste0("input/continuous/", area, "/"), pattern="*.sdat$", full.names = T), rast)
+vars_cont <- map(list.files(paste0("input/continuous/", area, "/"), pattern="*.sdat$", full.names = T), read_r)
 su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'))
 
 #Discrete variables
-vars_disc <- map(list.files(paste0("input/discrete/", area, "/"), pattern="*.sdat$", full.names = T), rast)
+vars_disc <- map(list.files(paste0("input/discrete/", area, "/"), pattern="*.sdat$", full.names = T), read_r)
 su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority')
 
-su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc)) |> dplyr::select(-c(geometry, gridcode)) 
+su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc))
 
 all<-data.frame(su_model)
 
@@ -126,19 +135,18 @@ all=na.exclude(all)
 
 rownames(all) <- NULL
 
-vif_test <- subset( all, select = -c(Id) )
-sink("salida/vif.txt")  #Escribe la salida de VIF a vif.txt
-vif(vif_test)
-sink() 
+# vif_test <- subset( all, select = -c(Id) )
+# sink("salida/vif.txt")  #Escribe la salida de VIF a vif.txt
+# vif(vif_test)
+# sink() 
 
-all$frane<-as.factor(all$frane)
 
 ##########################
 #Maxent modeling
 ##########################
-all_maxent <- all %>% 
-  dplyr::select(-c(Id)) %>%
+all_maxent <- all %>%
   dplyr::rename(RV=frane) %>%
+  dplyr::select(-c(DN, geometry)) %>%
   mutate_at(c('RV'), ~na_if(., 0))
 
 all_maxentDVs <- deriveVars(all_maxent, 
@@ -148,8 +156,7 @@ all_maxentDVselect <- selectDVforEV(all_maxentDVs$dvdata, alpha = 0.001, quiet =
 all_maxentEVselect <- selectEV(all_maxentDVselect$dvdata, alpha = 0.001, interaction = TRUE)
 
 all_maxent_model <- chooseModel(all_maxentDVselect$dvdata, 
-                                formula("~ median.cplan + median.cprof + median.dem + median.slope + 
-    stdev.cprof + stdev.dem + stdev.slope"))
+                                formula(reformulate(names(all_maxentDVselect$dvdata)[-1], "RV")))
 
 all_m <- all
 
@@ -158,9 +165,13 @@ all_maxent_modelPreds <- projectModel(model = all_maxent_model,
                                data = all_m)
 
 all_maxentfinal <- left_join(su, all_maxent_modelPreds$output)
-sf::st_write(all_maxentfinal, "salida/su_apa_maxent.shp", append = FALSE)
+sf::st_write(all_maxentfinal, "salida/su_els_maxent.shp", append = FALSE)
 
+##########################
 #MARS modeling
+##########################
+
+all$frane<-as.factor(all$frane)
 
 pos_all<-all[which(all$frane=="1"),]
 
