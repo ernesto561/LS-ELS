@@ -140,7 +140,6 @@ rownames(all) <- NULL
 # vif(vif_test)
 # sink() 
 
-
 ##########################
 #Maxent modeling
 ##########################
@@ -216,7 +215,7 @@ mars_all<-NULL
 all_predict<-matrix(nrow=nrow(all_val14[[i]]), ncol = n)
 AUC_all<-matrix(nrow=1, ncol=n)
 
-####An?lisis de regresi?n####
+####Regression analysis
 ####Cambiar esta linea si se cambian variables####
 
 for(i  in 1:n){
@@ -242,7 +241,7 @@ summary_earth <- lapply(1:n, function(x) capture.output(summary(mars_all[[x]]), 
 ####ROC curve####
 #################
 
-#Curva ROC creada para los datos de validaci?n
+#ROC curve for validation data
 
 casi_all<-NULL
 
@@ -283,14 +282,13 @@ AUC_all_avg <- round(AUC_all_avg, digits = 3)
 
 
 ######confusion#####
-#Matriz de confusi?n creada para los datos de validaci?n
+#COnfusion matrix for validation data
 casiallc<-matrix(nrow = nrow(all_val14[[1]]), ncol=n)
 
 for(i  in 1:n){
   
   casiallc[,i]<-as.vector(all_val14[[i]]$frane)
 }
-
 
 roc_all_m<-NULL
 casesall<-as.vector(casiallc)
@@ -326,7 +324,7 @@ sink()
 ####ROC curve####
 #################
 
-#Curva ROC creada para los datos de calibraci?n
+#ROC curve for calibration data
 all_predict<-matrix(nrow=nrow(all_cal14[[i]]), ncol = n)
 AUC_all<-matrix(nrow=1, ncol=n)
 
@@ -383,7 +381,7 @@ AUC_all_avg<- mean(AUC_all)
 AUC_all_avg <- round(AUC_all_avg, digits = 3)
 
 ######confusion#####
-#Matriz de confusi?n creada para los datos de calibraci?n
+#COnfusion matrix for calibration data
 
 casiallc<-matrix(nrow = nrow(all_cal14[[1]]), ncol=n)
 
