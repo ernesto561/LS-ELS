@@ -111,10 +111,6 @@ ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.05)+theme_bw()
 ################################
 
 crs_els <- st_crs(su)
-#Set crs for all rasters
-# read_r <- function(x){r <- rast(x)
-#                       crs(r)<-crs$wkt
-#                       return(r)}
 
 read_r <- function(x){r <- rast(x);crs(r)<-crs_els$wkt;return(r)}
 
@@ -140,31 +136,31 @@ rownames(all) <- NULL
 # vif(vif_test)
 # sink() 
 
-##########################
-#Maxent modeling
-##########################
-all_maxent <- all %>%
-  dplyr::rename(RV=frane) %>%
-  dplyr::select(-c(DN, geometry)) %>%
-  mutate_at(c('RV'), ~na_if(., 0))
-
-all_maxentDVs <- deriveVars(all_maxent, 
-                           transformtype = c("L","M","D","B"))
-
-all_maxentDVselect <- selectDVforEV(all_maxentDVs$dvdata, alpha = 0.001, quiet = TRUE)
-all_maxentEVselect <- selectEV(all_maxentDVselect$dvdata, alpha = 0.001, interaction = TRUE)
-
-all_maxent_model <- chooseModel(all_maxentDVselect$dvdata, 
-                                formula(reformulate(names(all_maxentDVselect$dvdata)[-1], "RV")))
-
-all_m <- all
-
-all_maxent_modelPreds <- projectModel(model = all_maxent_model,
-                               transformations = all_maxentDVs$transformations,
-                               data = all_m)
-
-all_maxentfinal <- left_join(su, all_maxent_modelPreds$output)
-sf::st_write(all_maxentfinal, "salida/su_els_maxent.shp", append = FALSE)
+# ##########################
+# #Maxent modeling
+# ##########################
+# all_maxent <- all %>%
+#   dplyr::rename(RV=frane) %>%
+#   dplyr::select(-c(DN, geometry)) %>%
+#   mutate_at(c('RV'), ~na_if(., 0))
+# 
+# all_maxentDVs <- deriveVars(all_maxent, 
+#                            transformtype = c("L","M","D","B"))
+# 
+# all_maxentDVselect <- selectDVforEV(all_maxentDVs$dvdata, alpha = 0.001, quiet = TRUE)
+# all_maxentEVselect <- selectEV(all_maxentDVselect$dvdata, alpha = 0.001, interaction = TRUE)
+# 
+# all_maxent_model <- chooseModel(all_maxentDVselect$dvdata, 
+#                                 formula(reformulate(names(all_maxentDVselect$dvdata)[-1], "RV")))
+# 
+# all_m <- all
+# 
+# all_maxent_modelPreds <- projectModel(model = all_maxent_model,
+#                                transformations = all_maxentDVs$transformations,
+#                                data = all_m)
+# 
+# all_maxentfinal <- left_join(su, all_maxent_modelPreds$output)
+# sf::st_write(all_maxentfinal, "salida/su_els_maxent.shp", append = FALSE)
 
 ##########################
 #MARS modeling
@@ -219,12 +215,19 @@ AUC_all<-matrix(nrow=1, ncol=n)
 ####Cambiar esta linea si se cambian variables####
 
 for(i  in 1:n){
-  mars_all[[i]]<- earth (reformulate(names(dplyr::select(all, -c(Id, frane))), "frane"), data = all_cal14[[i]], trace = 1, degree=1,  glm=list(family=binomial), Scale.y=FALSE)}
+  mars_all[[i]]<- earth (reformulate(names(dplyr::select(all, -c(DN, frane, geometry))), "frane"), data = all_cal14[[i]], trace = 1, degree=1,  glm=list(family=binomial), Scale.y=FALSE)}
 
 for(i  in 1:n){
   all_predict[,i]<-predict(mars_all[[i]], all_val14[[i]], type=c("response"))
 }
 
+summary_earth <- lapply(1:n, function(x) capture.output(summary(mars_all[[x]]), file = "salida/summary_earth.csv", append = TRUE))
+
+#################################
+####ROC curve validation data####
+#################################
+
+#ROC curve for validation data
 for(i  in 1:n){
   all_val14[[i]]$frane<-as.factor(all_val14[[i]]$frane)
 }
@@ -234,21 +237,12 @@ for(i  in 1:n){
 }
 
 write.csv(AUC_all, "salida/AUC_all_val.csv")
-summary_earth <- lapply(1:n, function(x) capture.output(summary(mars_all[[x]]), file = "salida/summary_earth.csv", append = TRUE))
-
-
-#################
-####ROC curve####
-#################
-
-#ROC curve for validation data
 
 casi_all<-NULL
 
 for(i  in 1:n){
   casi_all[[i]]<- data.frame(all_val14[[i]]$frane)
 }
-
 
 score_all<-NULL
 
@@ -280,6 +274,27 @@ youdenall_avg<- round(youdenall_avg, digits=3)
 AUC_all_avg<- mean(AUC_all)
 AUC_all_avg <- round(AUC_all_avg, digits = 3)
 
+#################################
+####AUC function####
+#################################
+
+auc <- function(vec, name){
+  
+  #ROC curve 
+  for(i  in 1:n){
+    vec[[i]][["frane"]]<-as.factor(vec[[i]][["frane"]])
+  }
+  
+  for(i  in 1:n){
+    AUC_all[,i]<-auc(vec[[i]][["frane"]],all_predict[,i])
+  }
+  
+  write.csv(AUC_all, paste0("salida/AUC_", name))
+  AUC_all_avg<- round(mean(AUC_all), digits = 3)
+  return(AUC_all_avg)
+}
+
+auc(all_val14, "mars_random_val.csv")
 
 ######confusion#####
 #COnfusion matrix for validation data
@@ -320,9 +335,9 @@ printconfall<-print(conf_all, digits=max(3, getOption("digits") - 3 ), printStat
 sink() 
 
 
-#################
-####ROC curve####
-#################
+#################################
+####ROC curve calibration data####
+#################################
 
 #ROC curve for calibration data
 all_predict<-matrix(nrow=nrow(all_cal14[[i]]), ncol = n)
