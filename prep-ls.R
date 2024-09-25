@@ -281,9 +281,7 @@ AUC_all_avg <- round(AUC_all_avg, digits = 3)
 auc <- function(vec, name){
   
   #ROC curve 
-  for(i  in 1:n){
-    vec[[i]][["frane"]]<-as.factor(vec[[i]][["frane"]])
-  }
+  vec %>% map_depth(., 1,~.x %>% mutate(across(c("frane"), as.factor)))
   
   for(i  in 1:n){
     AUC_all[,i]<-auc(vec[[i]][["frane"]],all_predict[,i])
@@ -295,6 +293,13 @@ auc <- function(vec, name){
 }
 
 auc(all_val14, "mars_random_val.csv")
+
+auc <- function(vec, name){
+  
+  #ROC curve 
+  all_cal14 <- vec %>% 
+    map_depth(., 1,~.x %>% mutate(across(c("frane"), as.factor)))
+}
 
 ######confusion#####
 #COnfusion matrix for validation data
