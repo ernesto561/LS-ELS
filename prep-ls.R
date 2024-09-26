@@ -282,11 +282,6 @@ AUC_all_avg <- round(AUC_all_avg, digits = 3)
 auc_model <- function(vec){
   
   #ROC curve 
-  for(i  in 1:n){
-    AUC_all[,i]<-auc(vec[[i]]$frane,all_predict[,i])
-  }
-  AUC_all_avg<- round(mean(AUC_all), digits = 3)
-  
   casi_all<-NULL;score_all<-NULL; xrocall<-NULL;roc_all<-NULL
   
   for(i  in 1:n){
