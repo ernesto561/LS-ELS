@@ -308,6 +308,35 @@ roc_model <- function(vec){
 
 }
 
+#################################
+####Mean ROC models function#####
+#################################
+roc_model <- function(vec){
+casiallc<-matrix(nrow = nrow(vec[[1]]), ncol=n)
+
+for(i  in 1:n){
+  casiallc[,i]<-as.vector(vec[[i]]$frane)
+}
+
+roc_all_m<-NULL
+casesall<-as.vector(casiallc)
+scoreall<-as.vector(all_predict)
+dataall<-data.frame(score=scoreall,response=casesall)
+roc_all_m<-roc(dataall$response ~ dataall$score, dataall)
+youdenall_m<- min(coords(roc_all_m, "b", ret="t", best.method="youden"))
+youdenall_m<- round(youdenall_m, digits=3)
+auc_all_m<-round(roc_all_m$auc, digits = 3)
+
+return(list(roc_all_m, youdenall_m, auc_all_m))
+
+}
+
+#################################
+####Plot ROC models function#####
+#################################
+
+ggroc(roc_all, legacy.axes = T)+theme_bw()
+
 ######confusion#####
 #Confusion matrix for validation data
 casiallc<-matrix(nrow = nrow(all_val14[[1]]), ncol=n)
