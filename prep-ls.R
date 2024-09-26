@@ -335,7 +335,7 @@ return(list(roc_all_m, youdenall_m, auc_all_m))
 ####Plot ROC models function#####
 #################################
 
-ggroc(roc_all, legacy.axes = T)+theme_bw()
+ggroc(roc_all, legacy.axes = T)+geom_line(color="gray")+geom_line()+theme_bw()
 
 ######confusion#####
 #Confusion matrix for validation data
