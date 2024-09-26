@@ -18,6 +18,7 @@ library(ENMeval)
 memory.limit(800000)
 
 #path to SAGA executable
+#At this time, RSAGA only works with SAGA 8.4.1
 env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
 #env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
@@ -278,31 +279,45 @@ AUC_all_avg <- round(AUC_all_avg, digits = 3)
 ####AUC function####
 #################################
 
-auc <- function(vec, name){
+auc_model <- function(vec){
   
   #ROC curve 
-  vec %>% map_depth(., 1,~.x %>% mutate(across(c("frane"), as.factor)))
+  for(i  in 1:n){
+    AUC_all[,i]<-auc(vec[[i]]$frane,all_predict[,i])
+  }
+  AUC_all_avg<- round(mean(AUC_all), digits = 3)
+  
+  casi_all<-NULL;score_all<-NULL; xrocall<-NULL;roc_all<-NULL
   
   for(i  in 1:n){
-    AUC_all[,i]<-auc(vec[[i]][["frane"]],all_predict[,i])
+    casi_all[[i]]<- data.frame(vec[[i]]$frane)
+  }
+
+  for(i  in 1:n){
+    casi_all[[i]]<-as.vector(casi_all[i])
+    score_all[[i]]<-as.vector(all_predict[,i])
+  }
+
+  for(i in 1:n){
+    xrocall[[i]]<-data.frame(score= score_all[[i]],response=casi_all[[i]])
   }
   
-  write.csv(AUC_all, paste0("salida/AUC_", name))
-  AUC_all_avg<- round(mean(AUC_all), digits = 3)
-  return(AUC_all_avg)
-}
-
-auc(all_val14, "mars_random_val.csv")
-
-auc <- function(vec, name){
+  for(i in 1:n){
+    colnames(xrocall[[i]])<- c("score", "response")
+  }
   
-  #ROC curve 
-  all_cal14 <- vec %>% 
-    map_depth(., 1,~.x %>% mutate(across(c("frane"), as.factor)))
+  for(i in 1:n){
+    roc_all[[i]]<-roc(xrocall[[i]]$response ~ xrocall[[i]]$score, xrocall)}
+  
+  youdenall<-NULL
+  for(i in 1:n){youdenall[[i]]<- min(coords(roc_all[[i]], "b", ret="t", best.method="youden"))}
+  
+  return(list(AUC_all_avg, AUC_all, roc_all))
+
 }
 
 ######confusion#####
-#COnfusion matrix for validation data
+#Confusion matrix for validation data
 casiallc<-matrix(nrow = nrow(all_val14[[1]]), ncol=n)
 
 for(i  in 1:n){
