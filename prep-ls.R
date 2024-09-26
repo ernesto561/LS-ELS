@@ -276,10 +276,10 @@ AUC_all_avg<- mean(AUC_all)
 AUC_all_avg <- round(AUC_all_avg, digits = 3)
 
 #################################
-####AUC function####
+####ROC models function####
 #################################
 
-auc_model <- function(vec){
+roc_model <- function(vec){
   
   #ROC curve 
   casi_all<-NULL;score_all<-NULL; xrocall<-NULL;roc_all<-NULL
@@ -304,10 +304,7 @@ auc_model <- function(vec){
   for(i in 1:n){
     roc_all[[i]]<-roc(xrocall[[i]]$response ~ xrocall[[i]]$score, xrocall)}
   
-  youdenall<-NULL
-  for(i in 1:n){youdenall[[i]]<- min(coords(roc_all[[i]], "b", ret="t", best.method="youden"))}
-  
-  return(list(AUC_all_avg, AUC_all, roc_all))
+  return(list(roc_all))
 
 }
 
