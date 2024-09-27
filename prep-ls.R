@@ -335,7 +335,10 @@ return(list(roc_all_m, youdenall_m, auc_all_m))
 ####Plot ROC models function#####
 #################################
 
-ggroc(roc_all, legacy.axes = T)+geom_line(color="gray")+geom_line()+theme_bw()
+mean_roc <- data.frame(x=1-roc_all_m$specificities, y=roc_all_m$sensitivities)
+
+ggroc(roc_all, legacy.axes = T)+geom_line(color="gray")+
+  geom_line(data = mean_roc, aes(x, y), color="red", inherit.aes = FALSE)+theme_bw()+theme(legend.position="none")
 
 ######confusion#####
 #Confusion matrix for validation data
