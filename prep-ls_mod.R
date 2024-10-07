@@ -147,8 +147,13 @@ roc_model <- function(vec, all_predict){
   casi_all<-NULL;score_all<-NULL; xrocall<-NULL;roc_all<-NULL
   
   for(i  in 1:n){
+    print(n)
+    print(i)
+    print(vec[[i]]$frane)
     casi_all[[i]]<- data.frame(vec[[i]]$frane)
   }
+  
+  print(casi_all)
 
   for(i  in 1:n){
     casi_all[[i]]<-as.vector(casi_all[i])
