@@ -247,7 +247,7 @@ roc_random <- roc_model(calval_random[[2]], mars_random)
 ####Mean ROC models function#####
 #################################
 
-#Input is vec(validation or calibration data) and all_predict (output of mars_model)
+#Input is vec (validation or calibration data) and all_predict (output of mars_model)
 
 roc_model_m <- function(vec, all_predict){
 casiallc<-matrix(nrow = nrow(vec[[1]]), ncol=n)
@@ -269,7 +269,7 @@ return(list(roc_all_m, youdenall_m, auc_all_m))
 
 }
 
-roc_m_random <- roc_model(calval_random[[2]], mars_random)
+roc_m_random <- roc_model_m(calval_random[[2]], mars_random)
 
 #################################
 ####Plot ROC models function#####
@@ -279,10 +279,12 @@ roc_m_random <- roc_model(calval_random[[2]], mars_random)
 
 plot_roc <- function(roc_all, roc_all_m){
 
-mean_roc <- data.frame(x=1-roc_all_m$specificities, y=roc_all_m$sensitivities)
+mean_roc <- data.frame(x=1-roc_all_m[[1]]$specificities, y=roc_all_m[[1]]$sensitivities)
 
-p<- ggroc(roc_all, legacy.axes = T)+geom_line(color="gray")+
-  geom_line(data = mean_roc, aes(x, y), color="red", inherit.aes = FALSE)+theme_bw()+theme(legend.position="none")
+p<- ggroc(roc_all[[1]], legacy.axes = T)+geom_line(color="gray")+
+  geom_line(data = mean_roc, aes(x, y), color="red", inherit.aes = FALSE)+
+  annotate("text", x=0.75, y=0.75, label= paste0("AUC = ", roc_m_random[[3]]))+
+  theme_bw()+theme(legend.position="none")
 
 return(p)
 
