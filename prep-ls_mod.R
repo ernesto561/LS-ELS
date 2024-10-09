@@ -20,8 +20,8 @@ memory.limit(800000)
 
 #path to SAGA executable
 #At this time, RSAGA only works with SAGA 8.4.1
-#env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
-env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
 #number of replications
 n <- 10
@@ -30,6 +30,8 @@ n <- 10
 
 #folder name
 area <- "els_alos"
+
+els_lim <- read_sf("input/limits_els/els_outline.shp")
 
 #Slope units
 su <- read_sf("input/su/SU_ELS.shp") 
@@ -49,7 +51,7 @@ ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.02)+theme_bw()
 # 
 # ####Variables preprocessing####
 # terra::writeRaster(dem, paste0("input/continuous/", area, "/dem.sdat"), overwrite=TRUE)
-#terra::writeRaster fails with large rasters. Converted to sdat with 30 m resolution in QGIS.
+#terra::writeRaster fails with large rasters. Converted to sdat with 30 m in both x and y resolution in QGIS.
 
 #The input is a DEM in sdat format called "dem.sdat"
 
@@ -104,36 +106,36 @@ su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc))
 
 all<-data.frame(su_model)
 
+
 #Removes NoData Values
 all=na.exclude(all)
 rownames(all) <- NULL
+
+all_random <- all
+all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
 
 ##########################
 ######Variable plots######
 ##########################
 
-map <- function(var){
+map_vars <- function(sf, var){
   name <- "var"
   titulo <- name
-  tm <- tm_shape(dem)+
-    tm_raster(style="cont")+
-    tm_layout(main.title = titulo, 
-              main.title.size = 1.5, 
-              main.title.position = c("left", "top"), 
-              legend.title.size = 1.2,
-              legend.text.size = 1,
-              inner.margins = c(0.2, 0.2, 0.2, 0.2))+
-    tm_scale_bar(position = c("left", "bottom"), text.size = 0.7)+
-    tm_compass(position = c("right", "top"))#+
-    # #tm_add_legend(type = "fill", 
-    #               labels = c("Depósito"),
-    #               col = NA,
-    #               border.lwd = 1.5,
-    #               border.col = "red")
-  #tmap_save(tm, paste0("../imagenes/", zona_comp, name,".png"), asp=get_asp_ratio(tm))
-  return(tm)
+  tm <- tm_shape(sf)+
+    tm_fill(var)+
+    tm_shape(els_lim)+
+    tm_borders()
 }
 
+su_model_sf <- st_as_sf(su_model)
+
+vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
+map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
+
+varmap1 <- tmap_arrange(map_list[1:4])
+tmap_save(varmap1, filename = "output/varmap1.png")
+varmap2 <- tmap_arrange(map_list[5:9])
+tmap_save(varmap2, filename = "output/varmap2.png")
 
 
 ################################
@@ -178,7 +180,8 @@ return(list(all_cal14, all_val14))
 
 }
 
-calval_random <- cal_val(all)
+calval_random <- cal_val(all_random)
+calval_slo5 <- cal_val(all_slo5)
 
 #####################
 ####MARS modeling####
@@ -206,6 +209,7 @@ return(list(mars_all,all_predict))
 }
 
 mars_random <- mars_model(calval_random[[1]], calval_random[[2]])
+mars_slo5 <- mars_model(calval_slo5[[1]], calval_slo5[[2]])
 
 ############################
 ####ROC models function#####
@@ -242,6 +246,8 @@ roc_model <- function(vec, all_predict){
 
 #Validation data
 roc_random <- roc_model(calval_random[[2]], mars_random[[2]])
+roc_slo5 <- roc_model(calval_slo5[[2]], mars_slo5[[2]])
+
 
 #################################
 ####Mean ROC models function#####
@@ -270,6 +276,7 @@ return(list(roc_all_m, youdenall_m, auc_all_m))
 }
 
 roc_m_random <- roc_model_m(calval_random[[2]], mars_random[[2]])
+roc_m_slo5 <- roc_model_m(calval_slo5[[2]], mars_slo5[[2]])
 
 #################################
 ####Plot ROC models function#####
@@ -291,9 +298,10 @@ return(p)
 }
 
 plot_roc(roc_random, roc_m_random)
+plot_roc(roc_slo5, roc_m_slo5)
 
 ###################
-####all_map####
+####all_map########
 ###################
 
 #all is the input data, model is the output of
@@ -318,4 +326,22 @@ return(su_map)
 
 }
 
-els_random <- all_map(all, mars_random[[1]], "els_random")
+els_random <- all_map(all_random, mars_random[[1]], "els_random")
+els_slo5 <- all_map(all_slo5, mars_slo5[[1]], "els_slo5")
+
+
+
+###Final map###
+su_map <- function(sf, var, n, style, palette){
+  name <- "var"
+  titulo <- name
+  tm <- tm_shape(sf)+
+    tm_fill(var, n=n, style = style, palette = palette )+
+    tm_shape(els_lim)+
+    tm_borders(lwd = 2)
+  return(tm)
+}
+
+su_map(els_random, "score", 4, "jenks", "-RdYlGn")
+su_map(els_slo5, "score", 4, "jenks", "-RdYlGn")
+
