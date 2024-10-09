@@ -20,11 +20,11 @@ memory.limit(800000)
 
 #path to SAGA executable
 #At this time, RSAGA only works with SAGA 8.4.1
-env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
-#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+#env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
 #number of replications
-n <- 5
+n <- 10
 
 ##Read data
 
@@ -199,9 +199,9 @@ for(i  in 1:n){
   all_predict[,i]<-predict(mars_all[[i]], val[[i]], type=c("response"))
 }
 
-summary_earth <- lapply(1:n, function(x) capture.output(summary(mars_all[[x]]), file = "salida/summary_earth.csv", append = TRUE))
+summary_earth <- lapply(1:n, function(x) capture.output(summary(mars_all[[x]]), file = "output/summary_earth.csv", append = TRUE))
 
-return(all_predict)
+return(list(mars_all,all_predict))
 
 }
 
@@ -241,7 +241,7 @@ roc_model <- function(vec, all_predict){
 }
 
 #Validation data
-roc_random <- roc_model(calval_random[[2]], mars_random)
+roc_random <- roc_model(calval_random[[2]], mars_random[[2]])
 
 #################################
 ####Mean ROC models function#####
@@ -269,7 +269,7 @@ return(list(roc_all_m, youdenall_m, auc_all_m))
 
 }
 
-roc_m_random <- roc_model_m(calval_random[[2]], mars_random)
+roc_m_random <- roc_model_m(calval_random[[2]], mars_random[[2]])
 
 #################################
 ####Plot ROC models function#####
@@ -284,7 +284,7 @@ mean_roc <- data.frame(x=1-roc_all_m[[1]]$specificities, y=roc_all_m[[1]]$sensit
 p<- ggroc(roc_all[[1]], legacy.axes = T)+geom_line(color="gray")+
   geom_line(data = mean_roc, aes(x, y), color="red", inherit.aes = FALSE)+
   annotate("text", x=0.75, y=0.75, label= paste0("AUC = ", roc_m_random[[3]]))+
-  theme_bw()+theme(legend.position="none")
+  theme_bw()+theme(legend.position="none")+coord_equal()
 
 return(p)
 
@@ -295,16 +295,27 @@ plot_roc(roc_random, roc_m_random)
 ###################
 ####all_map####
 ###################
+
+#all is the input data, model is the output of
+
+all_map <- function(all, model, name){
+
 all_map<-matrix(nrow=nrow(all), ncol=n)
 
 for(i  in 1:n){
-  all_map[,i]<-predict(mars_all[[i]], all, type=c("response"))
+  all_map[,i]<-predict(model[[i]], all, type=c("response"))
 }
 
 all_map_avg <-apply(all_map,1, mean)
 all_map_avg<- round(all_map_avg, digits=4)
 
-all_map_data<-data.frame(Id=all$Id,score=all_map_avg)
+all_map_data<-data.frame(DN=all$DN,score=all_map_avg)
 
 su_map = left_join(su, all_map_data)
-sf::st_write(su_map, "salida/su_apa_mean_sd.shp", append = FALSE)
+sf::st_write(su_map, paste0("output/", name, ".shp"), append = FALSE)
+
+return(su_map)
+
+}
+
+els_random <- all_map(all, mars_random[[1]], "els_random")
