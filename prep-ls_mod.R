@@ -332,16 +332,25 @@ els_slo5 <- all_map(all_slo5, mars_slo5[[1]], "els_slo5")
 
 
 ###Final map###
-su_map <- function(sf, var, n, style, palette){
+su_map <- function(sf, var, n, style, palette, title){
   name <- "var"
   titulo <- name
   tm <- tm_shape(sf)+
     tm_fill(var, n=n, style = style, palette = palette )+
     tm_shape(els_lim)+
-    tm_borders(lwd = 2)
+    tm_borders(lwd = 2)+
+    tm_layout(
+      title = title,
+      title.position = c("left", "top"),
+      title.size = 1.1,
+      bg.color = "#fcfcfc",
+      inner.margins = c(0.06, 0.01, 0.09, 0.01),
+      outer.margins = 0,
+      frame.lwd = 0.2
+    )
   return(tm)
 }
 
-su_map(els_random, "score", 4, "jenks", "-RdYlGn")
-su_map(els_slo5, "score", 4, "jenks", "-RdYlGn")
+su_map(els_random, "score", 4, "jenks", "-RdYlGn", "Landslide susceptibility - random negative samples")
+su_map(els_slo5, "score", 4, "jenks", "-RdYlGn", "Landslide susceptibility - slopes <=5")
 
