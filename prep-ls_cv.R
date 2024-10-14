@@ -17,6 +17,7 @@ library(ENMeval)
 library(tmap)
 library(caret)
 library(GGally)
+library(xgboost)
 
 memory.limit(800000)
 
@@ -33,6 +34,7 @@ n <- 10
 #folder name
 area <- "els_alos"
 
+#El Salvador outline (for maps)
 els_lim <- read_sf("input/limits_els/els_outline.shp")
 
 #Slope units
@@ -113,6 +115,8 @@ all<-data.frame(su_model)
 all=na.exclude(all)
 rownames(all) <- NULL
 
+all$frane <- as.factor(all$frane)
+
 all_random <- all
 all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
 
@@ -154,7 +158,7 @@ ggpairs(vars_to_plot)
 
 cal_val <- function(all){
 
-  X_data <- dplyr::select(all, -c(DN, geometry))
+  X_data <- all
   y_data <- all[["frane"]]
   
   #Split the data set
@@ -162,12 +166,12 @@ cal_val <- function(all){
   
   # 70/30 split
   split_indices <- createDataPartition(y_data, p = 0.7, list = FALSE)
-  X_train <- X_data[split_indices, ]
-  X_test <- X_data[-split_indices, ]
-  y_train <- y_data[split_indices]
-  y_test <- y_data[-split_indices]
+  X_tr <- X_data[split_indices, ]
+  X_train <- downSample(X_tr%>%dplyr::select(-c(frane)), X_tr$frane, yname = "frane")
+  X_tst <- X_data[-split_indices, ]
+  X_test <- X_tst %>% relocate(frane, .after = last_col())
   
-  return(list(X_train, X_test, y_train, y_test))
+  return(list(X_train, X_test))
 
 }
 
@@ -175,21 +179,21 @@ calval_random <- cal_val(all_random)
 calval_slo5 <- cal_val(all_slo5)
 
 #####################
-####MARS modeling####
+####Modeling#########
 #####################
 model <- function(X_train){
- 
-
+  X_train_sel <- X_train %>% dplyr::select(-c(DN, geometry))
+  default_model <- xgboost(data = as.matrix(X_train_sel),
+                           label = X_train_sel$frane,
+                           booster = "gbtree",
+                           objective = "binary:logistic",
+                           nrounds = 100,
+                           verbose = 0) 
 return(default_model)
 
 }
 
-default_model <- xgboost(data = as.matrix(X_train),
-                         label = y_train,
-                         booster = "gbtree",
-                         objective = "binary:logistic",
-                         nrounds = 100,
-                         verbose = 0)
+model_random <- model(calval_random[[1]])
 
 xgbpred <- function(model, data, ...) {
   predict(model, newdata=as.matrix(data), ...)
