@@ -23,8 +23,8 @@ memory.limit(800000)
 
 #path to SAGA executable
 #At this time, RSAGA only works with SAGA 8.4.1
-#env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
-env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
 #number of replications
 n <- 10
@@ -35,7 +35,7 @@ n <- 10
 area <- "els_alos"
 
 #El Salvador outline (for maps)
-#els_lim <- read_sf("input/limits_els/els_outline.shp")
+els_lim <- read_sf("input/limits_els/els_outline.shp")
 
 #Slope units
 su <- read_sf("input/su/SU_ELS.shp") 
@@ -100,11 +100,11 @@ read_r <- function(x){r <- rast(x);crs(r)<-crs_els$wkt;return(r)}
 
 #Continuous variables
 vars_cont <- map(list.files(paste0("input/continuous/", area, "/"), pattern="*.sdat$", full.names = T), read_r)
-su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'))
+su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'), force_df =T, full_colnames = T)
 
 #Discrete variables
 vars_disc <- map(list.files(paste0("input/discrete/", area, "/"), pattern="*.sdat$", full.names = T), read_r)
-su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority')
+su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority', force_df =T, full_colnames = T)
 
 su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc))
 
@@ -116,6 +116,7 @@ all=na.exclude(all)
 rownames(all) <- NULL
 
 all$frane <- as.factor(all$frane)
+all$majority.asp <- as.factor(all$majority.asp)
 
 all_random <- all
 all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
@@ -156,10 +157,13 @@ vars_to_plot <- dplyr::select(all, -c(DN, geometry))
 #Calibration and validation data
 ################################
 
-cal_val <- function(all){
+cal_val <- function(df){
 
-  X_data <- all
-  y_data <- all[["frane"]]
+  X_data <- df
+  y_data <- df[["frane"]]
+  
+  X_data_pred <- X_data %>% dplyr::select(-c(DN, geometry))
+  X_data_pred_m <- sparse.model.matrix(frane ~ ., data = X_data_pred)[,-1]
   
   #Split the data set
   set.seed(50)
@@ -167,11 +171,15 @@ cal_val <- function(all){
   # 70/30 split
   split_indices <- createDataPartition(y_data, p = 0.7, list = FALSE)
   X_tr <- X_data[split_indices, ]
-  X_train <- downSample(X_tr%>%dplyr::select(-c(frane)), X_tr$frane, yname = "frane")
+  #Downsampling in order to create a balanced dataset
+  X_tr_bal <- downSample(X_tr%>%dplyr::select(-c(frane, DN, geometry)), X_tr$frane, yname = "frane") 
+  #Dummy contrast coding for categorical variables (https://cran.r-project.org/web/packages/xgboost/vignettes/discoverYourData.html)
+  X_train <- sparse_matrix <- sparse.model.matrix(frane ~ ., data = X_tr_bal)[,-1]
+  Y_train <- as.numeric(as.character(X_tr_bal$frane)) 
   X_tst <- X_data[-split_indices, ]
   X_test <- X_tst %>% relocate(frane, .after = last_col())
   
-  return(list(X_train, X_test))
+  return(list(X_train, Y_train, X_test, X_data_pred_m))
 
 }
 
@@ -181,10 +189,9 @@ calval_slo5 <- cal_val(all_slo5)
 #####################
 ####Modeling#########
 #####################
-model <- function(X_train){
-  X_train_sel <- X_train %>% dplyr::select(-c(DN, geometry))
-  default_model <- xgboost(data = model.matrix(~.+0,data = X_train_sel[,-c("frane")]),
-                           label = X_train_sel$frane,
+model <- function(X_train, Y_train){
+   default_model <- xgboost(data = X_train,
+                           label = Y_train,
                            booster = "gbtree",
                            objective = "binary:logistic",
                            nrounds = 100,
@@ -193,104 +200,22 @@ return(default_model)
 
 }
 
-model_random <- model(calval_random[[1]])
+model_random <- model(calval_random[[1]], calval_random[[2]])
 
-xgbpred <- function(model, data, ...) {
-  predict(model, newdata=as.matrix(data), ...)
-}
+##Importance matrix and plot
 
-p <- predict(default_model, as.matrix(X_data), type = "response")
+importance <- xgb.importance(feature_names = colnames(calval_random[[1]]), model = model_random)
+
+xgb.ggplot.importance(importance_matrix = importance)+theme_bw()+theme(plot.title.position = "plot")
+
+
+p <- predict(model_random, calval_random[[4]], type = "response")
 
 pred <- bind_cols(all, data.frame(p))
 
-############################
-####ROC models function#####
-############################
-
-roc_model <- function(vec, all_predict){
-  
-  #ROC curve 
-  casi_all<-NULL;score_all<-NULL; xrocall<-NULL;roc_all<-NULL
-  
-  for(i  in 1:n){
-    casi_all[[i]]<- data.frame(vec[[i]]$frane)
-  }
-  
-  for(i  in 1:n){
-    casi_all[[i]]<-as.vector(casi_all[i])
-    score_all[[i]]<-as.vector(all_predict[,i])
-  }
-
-  for(i in 1:n){
-    xrocall[[i]]<-data.frame(score= score_all[[i]],response=casi_all[[i]])
-  }
-  
-  for(i in 1:n){
-    colnames(xrocall[[i]])<- c("score", "response")
-  }
-  
-  for(i in 1:n){
-    roc_all[[i]]<-roc(xrocall[[i]]$response ~ xrocall[[i]]$score, xrocall)}
-  
-  return(list(roc_all))
-
-}
-
-#Validation data
-roc_random <- roc_model(calval_random[[2]], mars_random[[2]])
-roc_slo5 <- roc_model(calval_slo5[[2]], mars_slo5[[2]])
+su_map_random <- left_join(su_model, pred, by = c("DN"),keep = FALSE)
 
 
-#################################
-####Mean ROC models function#####
-#################################
-
-#Input is vec (validation or calibration data) and all_predict (output of mars_model)
-
-roc_model_m <- function(vec, all_predict){
-casiallc<-matrix(nrow = nrow(vec[[1]]), ncol=n)
-
-for(i  in 1:n){
-  casiallc[,i]<-as.vector(vec[[i]]$frane)
-}
-
-roc_all_m<-NULL
-casesall<-as.vector(casiallc)
-scoreall<-as.vector(all_predict)
-dataall<-data.frame(score=scoreall,response=casesall)
-roc_all_m<-roc(dataall$response ~ dataall$score, dataall)
-youdenall_m<- min(coords(roc_all_m, "b", ret="t", best.method="youden"))
-youdenall_m<- round(youdenall_m, digits=3)
-auc_all_m<-round(roc_all_m$auc, digits = 3)
-
-return(list(roc_all_m, youdenall_m, auc_all_m))
-
-}
-
-roc_m_random <- roc_model_m(calval_random[[2]], mars_random[[2]])
-roc_m_slo5 <- roc_model_m(calval_slo5[[2]], mars_slo5[[2]])
-
-#################################
-####Plot ROC models function#####
-#################################
-
-#Inputs are roc_all (output of roc_model) and roc_all_m (output of roc_model_m)  
-
-plot_roc <- function(roc_all, roc_all_m){
-
-mean_roc <- data.frame(x=1-roc_all_m[[1]]$specificities, y=roc_all_m[[1]]$sensitivities)
-
-p<- ggroc(roc_all[[1]], legacy.axes = T)+geom_line(color="gray")+
-  geom_line(data = mean_roc, aes(x, y), color="red", inherit.aes = FALSE)+
-  annotate("text", x=0.75, y=0.75, label= paste0("AUC = ", roc_m_random[[3]]))+
-  theme_bw()+theme(legend.position="none")+coord_equal()
-
-return(p)
-
-}
-
-plot_roc(roc_random, roc_m_random)
-plot_roc(roc_slo5, roc_m_slo5)
 
 ###################
 ####all_map########
@@ -346,5 +271,5 @@ su_map <- function(sf, var, n, style, palette, title){
 su_map(els_random, "score", 4, "jenks", "-RdYlGn", "Landslide susceptibility - random negative samples")
 su_map(els_slo5, "score", 4, "jenks", "-RdYlGn", "Landslide susceptibility - slopes <=5")
 
-su_map(pp, "p", 4, "jenks", "-RdYlGn", "XGBoost")
+su_map(st_as_sf(su_map_random), "p", 4, "jenks", "-RdYlGn", "XGBoost")
 
