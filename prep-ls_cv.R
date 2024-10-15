@@ -23,8 +23,8 @@ memory.limit(800000)
 
 #path to SAGA executable
 #At this time, RSAGA only works with SAGA 8.4.1
-env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
-#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+#env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
 #number of replications
 n <- 10
@@ -35,7 +35,7 @@ n <- 10
 area <- "els_alos"
 
 #El Salvador outline (for maps)
-els_lim <- read_sf("input/limits_els/els_outline.shp")
+#els_lim <- read_sf("input/limits_els/els_outline.shp")
 
 #Slope units
 su <- read_sf("input/su/SU_ELS.shp") 
@@ -124,25 +124,25 @@ all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
 ######Variable maps######
 ##########################
 
-map_vars <- function(sf, var){
-  name <- "var"
-  titulo <- name
-  tm <- tm_shape(sf)+
-    tm_fill(var)+
-    tm_shape(els_lim)+
-    tm_borders()
-}
-
-su_model_sf <- st_as_sf(su_model)
-
-vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
-map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
-
-varmap1 <- tmap_arrange(map_list[1:4])
-tmap_save(varmap1, filename = "output/varmap1.png")
-varmap2 <- tmap_arrange(map_list[5:9])
-tmap_save(varmap2, filename = "output/varmap2.png")
-
+# map_vars <- function(sf, var){
+#   name <- "var"
+#   titulo <- name
+#   tm <- tm_shape(sf)+
+#     tm_fill(var)+
+#     tm_shape(els_lim)+
+#     tm_borders()
+# }
+# 
+# su_model_sf <- st_as_sf(su_model)
+# 
+# vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
+# map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
+# 
+# varmap1 <- tmap_arrange(map_list[1:4])
+# tmap_save(varmap1, filename = "output/varmap1.png")
+# varmap2 <- tmap_arrange(map_list[5:9])
+# tmap_save(varmap2, filename = "output/varmap2.png")
+# 
 
 ################################
 #Variable plots
@@ -150,7 +150,7 @@ tmap_save(varmap2, filename = "output/varmap2.png")
 
 vars_to_plot <- dplyr::select(all, -c(DN, geometry))
 
-ggpairs(vars_to_plot)
+#ggpairs(vars_to_plot)
 
 ################################
 #Calibration and validation data
@@ -183,7 +183,7 @@ calval_slo5 <- cal_val(all_slo5)
 #####################
 model <- function(X_train){
   X_train_sel <- X_train %>% dplyr::select(-c(DN, geometry))
-  default_model <- xgboost(data = as.matrix(X_train_sel),
+  default_model <- xgboost(data = model.matrix(~.+0,data = X_train_sel[,-c("frane")]),
                            label = X_train_sel$frane,
                            booster = "gbtree",
                            objective = "binary:logistic",
