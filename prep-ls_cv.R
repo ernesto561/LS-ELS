@@ -4,30 +4,22 @@ library(tidyverse)
 library(sf)
 library(terra)
 library(pROC)
-library(usdm) 
-library(splitstackshape) 
 library(caret)
 library(ROCR)
-library(sperrorest)
-library(earth)
 library(units)
-library(dismo)
-library(MIAmaxent)
-library(ENMeval)
 library(tmap)
-library(caret)
-library(GGally)
 library(xgboost)
+library(Matrix)
+library(parallel)
+library(doParallel)
 
-memory.limit(800000)
+cluster <- makeCluster(detectCores() - 4) # convention to leave 1 core for OS
+registerDoParallel(cluster)
 
 #path to SAGA executable
 #At this time, RSAGA only works with SAGA 8.4.1
 env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
 #env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
-
-#number of replications
-n <- 10
 
 ##Read data
 
@@ -38,7 +30,7 @@ area <- "els_alos"
 els_lim <- read_sf("input/limits_els/els_outline.shp")
 
 #Slope units
-su <- read_sf("input/su/SU_ELS.shp") 
+su <- read_sf("input/su/SU_ELS_limits.shp") 
 #Landslides
 ls_point <- read_sf("input/landslides/landslides_test.shp") 
 
@@ -66,16 +58,6 @@ rsaga.slope.asp.curv(in.dem = paste0("input/continuous/", area, "/dem.sdat"),
                      method = "poly2zevenbergen",
                      env = env)
 
-# rsaga.geoprocessor(lib = "ta_morphometry",
-#                    module = "TPI Based Landform Classification",
-#                    param = list(DEM = paste0("input/continuous/", area, "/dem.sdat"),
-#                                 LANDFORMS = paste0("input/discrete/", area, "/lcl.sdat"),
-#                                 RADIUS_A_MIN = 0,
-#                                 RADIUS_A_MAX = 100,
-#                                 RADIUS_B_MIN = 0,
-#                                 RADIUS_B_MAX = 1000),
-#                                 env = env)
-
 asp <- rast(paste0("input/discrete/", area, "/asp.sdat"))
 m <- c(0, 22.5, 1,
        22.5, 67.5, 2,
@@ -100,11 +82,11 @@ read_r <- function(x){r <- rast(x);crs(r)<-crs_els$wkt;return(r)}
 
 #Continuous variables
 vars_cont <- map(list.files(paste0("input/continuous/", area, "/"), pattern="*.sdat$", full.names = T), read_r)
-su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'), force_df =T, full_colnames = T)
+su_vars_cont <- exact_extract(rast(vars_cont), su, c('median', 'stdev'), force_df =T, full_colnames = T, max_cells_in_memory = 12e+07)
 
 #Discrete variables
 vars_disc <- map(list.files(paste0("input/discrete/", area, "/"), pattern="*.sdat$", full.names = T), read_r)
-su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority', force_df =T, full_colnames = T)
+su_vars_disc <- exact_extract(rast(vars_disc), su, 'majority', force_df =T, full_colnames = T, max_cells_in_memory = 12e+07)
 
 su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc))
 
@@ -162,93 +144,34 @@ cal_val <- function(df){
   X_data <- df
   y_data <- df[["frane"]]
   
-  X_data_pred <- X_data %>% dplyr::select(-c(DN, geometry))
-  X_data_pred_m <- sparse.model.matrix(frane ~ ., data = X_data_pred)[,-1]
-  
   #Split the data set
   set.seed(50)
-  
+   
   # 70/30 split
   split_indices <- createDataPartition(y_data, p = 0.7, list = FALSE)
   X_tr <- X_data[split_indices, ]
   #Downsampling in order to create a balanced dataset
-  X_tr_bal <- downSample(X_tr%>%dplyr::select(-c(frane, DN, geometry)), X_tr$frane, yname = "frane") 
+  X_tr_bal <- downSample(X_tr%>%dplyr::select(-c(frane)), X_tr$frane, yname = "frane")
   #Dummy contrast coding for categorical variables (https://cran.r-project.org/web/packages/xgboost/vignettes/discoverYourData.html)
-  X_train <- sparse_matrix <- sparse.model.matrix(frane ~ ., data = X_tr_bal)[,-1]
-  Y_train <- as.numeric(as.character(X_tr_bal$frane)) 
+  X_train <- sparse_matrix <- sparse.model.matrix(frane ~ ., data = X_tr_bal%>%dplyr::select(-c(DN, geometry)))[,-1]
+  Y_train <- as.numeric(as.character(X_tr_bal$frane))
   X_tst <- X_data[-split_indices, ]
   X_test <- X_tst %>% relocate(frane, .after = last_col())
   
-  return(list(X_train, Y_train, X_test, X_data_pred_m))
+  X_data_pred <- sparse.model.matrix(frane ~ ., data = X_data %>%dplyr::select(-c(DN, geometry)))[,-1]
+  
+  return(list(X_train, Y_train, X_tr_bal, X_test, X_data_pred))
 
 }
 
 calval_random <- cal_val(all_random)
 calval_slo5 <- cal_val(all_slo5)
 
-#####################
-####Modeling#########
-#####################
-model <- function(X_train, Y_train){
-   default_model <- xgboost(data = X_train,
-                           label = Y_train,
-                           booster = "gbtree",
-                           objective = "binary:logistic",
-                           nrounds = 100,
-                           verbose = 0) 
-return(default_model)
+#######################
+##Plots samples########
+#######################
 
-}
-
-model_random <- model(calval_random[[1]], calval_random[[2]])
-
-##Importance matrix and plot
-
-importance <- xgb.importance(feature_names = colnames(calval_random[[1]]), model = model_random)
-
-xgb.ggplot.importance(importance_matrix = importance)+theme_bw()+theme(plot.title.position = "plot")
-
-
-p <- predict(model_random, calval_random[[4]], type = "response")
-
-pred <- bind_cols(all, data.frame(p))
-
-su_map_random <- left_join(su_model, pred, by = c("DN"),keep = FALSE)
-
-
-
-###################
-####all_map########
-###################
-
-#all is the input data, model is the output of
-
-all_map <- function(all, model, name){
-
-all_map<-matrix(nrow=nrow(all), ncol=n)
-
-for(i  in 1:n){
-  all_map[,i]<-predict(model[[i]], all, type=c("response"))
-}
-
-all_map_avg <-apply(all_map,1, mean)
-all_map_avg<- round(all_map_avg, digits=4)
-
-all_map_data<-data.frame(DN=all$DN,score=all_map_avg)
-
-su_map = left_join(su, all_map_data)
-sf::st_write(su_map, paste0("output/", name, ".shp"), append = FALSE)
-
-return(su_map)
-
-}
-
-els_random <- all_map(all_random, mars_random[[1]], "els_random")
-els_slo5 <- all_map(all_slo5, mars_slo5[[1]], "els_slo5")
-
-
-
-###Final map###
+###Maps###
 su_map <- function(sf, var, n, style, palette, title){
   name <- "var"
   titulo <- name
@@ -268,8 +191,91 @@ su_map <- function(sf, var, n, style, palette, title){
   return(tm)
 }
 
-su_map(els_random, "score", 4, "jenks", "-RdYlGn", "Landslide susceptibility - random negative samples")
-su_map(els_slo5, "score", 4, "jenks", "-RdYlGn", "Landslide susceptibility - slopes <=5")
+su_map(st_as_sf(calval_random[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - random negative samples" )
+su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - random negative samples" )
 
-su_map(st_as_sf(su_map_random), "p", 4, "jenks", "-RdYlGn", "XGBoost")
+
+#####################
+####Modeling#########
+#####################
+model <- function(X_train, Y_train){
+   default_model <- xgboost(data = X_train,
+                           label = Y_train,
+                           booster = "gbtree",
+                           objective = "binary:logistic",
+                           nrounds = 100,
+                           verbose = 0) 
+return(default_model)
+
+}
+
+model_random <- model(calval_random[[1]], calval_random[[2]])
+model_slo5 <- model(calval_slo5[[1]], calval_slo5[[2]])
+
+
+##Importance matrix and plot
+
+importance <- xgb.importance(feature_names = colnames(calval_random[[1]]), model = model_random)
+xgb.ggplot.importance(importance_matrix = importance)+theme_bw()+theme(plot.title.position = "plot")
+
+p_random <- predict(model_random, calval_random[[5]], type = "response")
+pred_random <- bind_cols(all, data.frame(p_random))
+su_map_random <- left_join(su_model, pred_random, by = c("DN"), keep = FALSE)
+
+p_slo5 <- predict(model_slo5, calval_random[[5]], type = "response")
+pred_slo5 <- bind_cols(all, data.frame(p_slo5))
+su_map_slo5 <- left_join(su_model, pred_slo5, by = c("DN"), keep = FALSE)
+
+#############################
+####Hyperparameter tuning####
+#############################
+
+hyperparam_grid <- expand.grid(
+  nrounds = seq(from = 100, to = 300, by = 100),
+  eta = c(0.025, 0.05, 0.1, 0.3),
+  max_depth = c(4, 5, 6),
+  gamma = c(0, 1, 2),
+  colsample_bytree = c(0.5, 0.75, 1.0),
+  min_child_weight = c(1, 3, 5),
+  subsample = 1
+)
+
+tune_control <- caret::trainControl(
+  method = "cv", # cross-validation
+  number = 5, # with n folds
+  verboseIter = FALSE, # no training log
+  allowParallel = TRUE,
+  savePredictions = T,
+  classProbs = T,
+  summaryFunction = twoClassSummary
+)
+
+tuned_model <- function(X_train, Y_train){
+  y_val = as.factor(Y_train)
+  levels(y_val)=c("No","Yes")
+  bst <- caret::train(
+    x = X_train,
+    y = y_val,
+    trControl = tune_control,
+    tuneGrid = hyperparam_grid,
+    method = "xgbTree", #  to use XGB
+    verbose = FALSE,
+    verbosity = 0
+)
+  return(bst)
+
+}
+
+
+model_cal <- tuned_model(calval_random[[1]], calval_random[[2]])
+
+stopCluster(cluster)
+
+
+###################
+####all_map########
+###################
+
+su_map(st_as_sf(su_map_random), "p_random", 4, "jenks", "-RdYlGn", "XGBoost - random negative samples")
+su_map(st_as_sf(su_map_slo5), "p_slo5", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
 
