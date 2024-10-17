@@ -153,10 +153,10 @@ cal_val <- function(df){
   #Downsampling in order to create a balanced dataset
   X_tr_bal <- downSample(X_tr%>%dplyr::select(-c(frane)), X_tr$frane, yname = "frane")
   #Dummy contrast coding for categorical variables (https://cran.r-project.org/web/packages/xgboost/vignettes/discoverYourData.html)
-  X_train <- sparse_matrix <- sparse.model.matrix(frane ~ ., data = X_tr_bal%>%dplyr::select(-c(DN, geometry)))[,-1]
+  X_train <- sparse.model.matrix(frane ~ ., data = X_tr_bal%>%dplyr::select(-c(DN, geometry)))[,-1]
   Y_train <- as.numeric(as.character(X_tr_bal$frane))
-  X_tst <- X_data[-split_indices, ]
-  X_test <- X_tst %>% relocate(frane, .after = last_col())
+  X_tst <- X_data[-split_indices, ] %>% relocate(frane, .after = last_col())
+  X_test <- sparse.model.matrix(frane ~ ., data = X_tst%>%dplyr::select(-c(DN, geometry)))[,-1] 
   
   X_data_pred <- sparse.model.matrix(frane ~ ., data = X_data %>%dplyr::select(-c(DN, geometry)))[,-1]
   
@@ -242,7 +242,7 @@ hyperparam_grid <- expand.grid(
 
 tune_control <- caret::trainControl(
   method = "cv", # cross-validation
-  number = 5, # with n folds
+  number = 10, # with n folds
   verboseIter = FALSE, # no training log
   allowParallel = TRUE,
   savePredictions = T,
@@ -272,10 +272,22 @@ model_cal <- tuned_model(calval_random[[1]], calval_random[[2]])
 stopCluster(cluster)
 
 
+
+
 ###################
 ####all_map########
 ###################
 
 su_map(st_as_sf(su_map_random), "p_random", 4, "jenks", "-RdYlGn", "XGBoost - random negative samples")
 su_map(st_as_sf(su_map_slo5), "p_slo5", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
+
+
+dd.roc <- sapply(X = unique(model$pred$Resample),
+                 FUN = function(x) {
+                   r <- model$pred[model$pred$Resample == x,]
+                   R <- auc(response = r$obs, predictor = r$Yes)
+                   data.frame(auc=R$auc)
+                 }, simplify = F) %>%
+  bind_rows(.id = "Resample") %>%
+  as_tibble() 
 
