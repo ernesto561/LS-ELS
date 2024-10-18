@@ -13,13 +13,13 @@ library(Matrix)
 library(parallel)
 library(doParallel)
 
-cluster <- makeCluster(detectCores() - 4) # convention to leave 1 core for OS
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
 registerDoParallel(cluster)
 
 #path to SAGA executable
 #At this time, RSAGA only works with SAGA 8.4.1
-env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
-#env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
+#env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
+env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
 ##Read data
 
@@ -107,33 +107,25 @@ all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
 ######Variable maps######
 ##########################
 
-# map_vars <- function(sf, var){
-#   name <- "var"
-#   titulo <- name
-#   tm <- tm_shape(sf)+
-#     tm_fill(var)+
-#     tm_shape(els_lim)+
-#     tm_borders()
-# }
-# 
-# su_model_sf <- st_as_sf(su_model)
-# 
-# vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
-# map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
-# 
-# varmap1 <- tmap_arrange(map_list[1:4])
-# tmap_save(varmap1, filename = "output/varmap1.png")
-# varmap2 <- tmap_arrange(map_list[5:9])
-# tmap_save(varmap2, filename = "output/varmap2.png")
-# 
+map_vars <- function(sf, var){
+  name <- "var"
+  titulo <- name
+  tm <- tm_shape(sf)+
+    tm_fill(var)+
+    tm_shape(els_lim)+
+    tm_borders()
+}
 
-################################
-#Variable plots
-################################
+su_model_sf <- st_as_sf(su_model)
 
-vars_to_plot <- dplyr::select(all, -c(DN, geometry))
+vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
+map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
 
-#ggpairs(vars_to_plot)
+varmap1 <- tmap_arrange(map_list[1:4])
+tmap_save(varmap1, filename = "output/varmap1.png")
+varmap2 <- tmap_arrange(map_list[5:9])
+tmap_save(varmap2, filename = "output/varmap2.png")
+
 
 ################################
 #Calibration and validation data
@@ -250,7 +242,7 @@ tune_control <- caret::trainControl(
   summaryFunction = twoClassSummary
 )
 
-tuned_model <- function(X_train, Y_train){
+tuned_model <- function(X_train, Y_train, hyperparam_grid){
   y_val = as.factor(Y_train)
   levels(y_val)=c("No","Yes")
   bst <- caret::train(
@@ -267,7 +259,35 @@ tuned_model <- function(X_train, Y_train){
 }
 
 
-model_cal <- tuned_model(calval_random[[1]], calval_random[[2]])
+model_cal <- tuned_model(calval_random[[1]], calval_random[[2]], hyperparam_grid)
+model_random_final <- xgb.cv(data = calval_random[[1]],
+                             label = calval_random[[2]],
+                             booster = "gbtree",
+                             objective = "binary:logistic",
+                             nfold = 10,
+                             prediction = TRUE,
+                             eval_metric = "auc",
+                             nrounds=model_cal$bestTune$nrounds,
+                             eta=model_cal$bestTune$eta,
+                             max_depth=model_cal$bestTune$max_depth,
+                             gamma=model_cal$bestTune$gamma,
+                             colsample_bytree=model_cal$bestTune$colsample_bytree,
+                             min_child_weight=model_cal$bestTune$min_child_weight,
+                             subsample=model_cal$bestTune$subsample) 
+
+z <- lapply(model_random_final$folds, function(x){
+  pred <- model_random_final$pred[x]
+  true <- (calval_random[[2]])[x]
+  index <- x
+  out <- data.frame(pred, true, index)
+  auc = auc(out$true, out$pred) 
+}) 
+
+names(z) <- paste("fold", 1:10, sep = "_")
+
+lapply(z, function(x){auc(x$true, x$pred)}) %>%
+  bind_rows()
+
 
 stopCluster(cluster)
 
@@ -282,12 +302,13 @@ su_map(st_as_sf(su_map_random), "p_random", 4, "jenks", "-RdYlGn", "XGBoost - ra
 su_map(st_as_sf(su_map_slo5), "p_slo5", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
 
 
-dd.roc <- sapply(X = unique(model$pred$Resample),
+dd.roc <- sapply(X = unique(model_random_final$pred$Resample),
                  FUN = function(x) {
-                   r <- model$pred[model$pred$Resample == x,]
+                   r <- model_random_final$pred[model_random_final$pred$Resample == x,]
+                   return(r)
                    R <- auc(response = r$obs, predictor = r$Yes)
-                   data.frame(auc=R$auc)
+                   #data.frame(auc=R[[auc]])
                  }, simplify = F) %>%
   bind_rows(.id = "Resample") %>%
-  as_tibble() 
+  as_tibble()
 
