@@ -39,7 +39,9 @@ su$frane <- lengths(st_intersects(su, ls_point)) > 0
 su$frane <- as.integer(ifelse(su$frane == "TRUE", 1, 0))
 
 #Plot of su and landslides
-ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.02)+theme_bw() 
+ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.02)+
+  scale_fill_discrete(labels=c('No landslides', 'landslides'), name="Landslide inventory")+
+  theme_bw(16) 
 
 # #DEM
 # dem <- rast(paste0("input/continuous/", area, "/els_alos_30m.tif"))
@@ -280,16 +282,15 @@ z <- lapply(model_random_final$folds, function(x){
   true <- (calval_random[[2]])[x]
   index <- x
   out <- data.frame(pred, true, index)
-  auc = auc(out$true, out$pred) 
-}) 
+  auc = data.frame(auc = print(auc(out$true, out$pred)))
+  return(auc)
+}) %>% bind_rows()
 
 names(z) <- paste("fold", 1:10, sep = "_")
 
-lapply(z, function(x){auc(x$true, x$pred)}) %>%
-  bind_rows()
-
-
 stopCluster(cluster)
+
+pred <- predict(model_random_final, calval_random[[4]])
 
 
 
