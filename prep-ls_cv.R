@@ -13,7 +13,8 @@ library(Matrix)
 library(parallel)
 library(doParallel)
 
-cluster <- makeCluster(detectCores() - 4) # convention to leave 1 core for OS
+n <- 4
+cluster <- makeCluster(detectCores() - n) #  n is the number of cores remaining; convention to leave 1 core for OS
 registerDoParallel(cluster)
 
 #path to SAGA executable
@@ -139,7 +140,10 @@ vars_to_plot <- dplyr::select(all, -c(DN, geometry))
 #Calibration and validation data
 ################################
 
-cal_val <- function(df){
+#For this function, df is a dataframe with all the variables and per is
+#the percentage of calibration data
+
+cal_val <- function(df, per){
 
   X_data <- df
   y_data <- df[["frane"]]
@@ -148,7 +152,7 @@ cal_val <- function(df){
   set.seed(50)
    
   # 70/30 split
-  split_indices <- createDataPartition(y_data, p = 0.7, list = FALSE)
+  split_indices <- createDataPartition(y_data, p = per, list = FALSE)
   X_tr <- X_data[split_indices, ]
   #Downsampling in order to create a balanced dataset
   X_tr_bal <- downSample(X_tr%>%dplyr::select(-c(frane)), X_tr$frane, yname = "frane")
@@ -164,8 +168,8 @@ cal_val <- function(df){
 
 }
 
-calval_random <- cal_val(all_random)
-calval_slo5 <- cal_val(all_slo5)
+calval_random <- cal_val(all_random, 0.7)
+calval_slo5 <- cal_val(all_slo5, 0.7)
 
 #######################
 ##Plots samples########
@@ -192,7 +196,7 @@ su_map <- function(sf, var, n, style, palette, title){
 }
 
 su_map(st_as_sf(calval_random[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - random negative samples" )
-su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - random negative samples" )
+su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - slope < 5" )
 
 
 #####################
@@ -272,6 +276,12 @@ model_cal <- tuned_model(calval_random[[1]], calval_random[[2]])
 stopCluster(cluster)
 
 
+registerDoSEQ()
+
+unregister <- function() {
+  env <- foreach:::.foreachGlobals
+  rm(list=ls(name=env), pos=env)
+}
 
 
 ###################
