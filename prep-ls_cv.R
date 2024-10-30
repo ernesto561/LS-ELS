@@ -13,8 +13,11 @@ library(Matrix)
 library(parallel)
 library(doParallel)
 
-n <- 4
-cluster <- makeCluster(detectCores() - n) #  n is the number of cores remaining; convention to leave 1 core for OS
+Sys.setenv(TZ='America/El_Salvador')
+Sys.setlocale("LC_ALL", "en_US.UTF-8")
+
+n <- 1
+cluster <- makeCluster(detectCores() - n) #  n is the number of remaining cores; convention to leave 1 core for OS
 registerDoParallel(cluster)
 
 #path to SAGA executable
@@ -101,7 +104,9 @@ rownames(all) <- NULL
 all$frane <- as.factor(all$frane)
 all$majority.asp <- as.factor(all$majority.asp)
 
+#Random selection of negative slope units
 all_random <- all
+#Selection of negative slope units using median slope < 5°
 all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
 
 ##########################
@@ -250,8 +255,8 @@ tuned_model <- function(X_train, Y_train){
 
 }
 
-
-model_cal <- tuned_model(calval_random[[1]], calval_random[[2]])
+model_cal_rdm <- tuned_model(calval_random[[1]], calval_random[[2]])
+model_cal_slo5 <- tuned_model(calval_slo5[[1]], calval_slo5[[2]])
 
 stopCluster(cluster)
 
@@ -262,13 +267,14 @@ unregister <- function() {
   rm(list=ls(name=env), pos=env)
 }
 
-
 # run xgboost with optimal values
-model_random = xgboost(
+# The input is the the output of calval function and the output of tuned model
+model_opt <- function(calval, model_cal){
+xgboost(
   booster= "gbtree",#model used
   objective = "binary:logistic",
-  data = calval_random[[1]],#data
-  label = calval_random[[2]],#binary outcome
+  data = calval[[1]],#data
+  label = calval[[2]],#binary outcome
   eta = model_cal$bestTune$eta,#learning rate, determines shrinkage of the iterations
   verbose = FALSE,
   nrounds = model_cal$bestTune$nrounds,
@@ -280,32 +286,69 @@ model_random = xgboost(
   colsample_bytree = model_cal$bestTune$colsample_bytree,
   eval_metric = 'auc',
 )
+}
 
-model_random_resp_tst = predict(model_random, calval_random[[4]], type = "response")
+model_opt_random <- model_opt(calval_random, model_cal_rdm)
+model_opt_slo5 <- model_opt(calval_slo5, model_cal_slo5)
 
-auc_random <- roc(response = calval_random[[5]], predictor = model_random_resp_tst)
+#Predictions with test data
+model_random_pred_tst = predict(model_opt_random, calval_random[[4]], type = "response")
+model_slo5_pred_tst = predict(model_opt_slo5, calval_slo5[[4]], type = "response")
+
+
+#AUC test data
+auc_test_random <- roc(response = calval_random[[5]], predictor = model_random_pred_tst)
+auc_test_slo5 <- roc(response = calval_slo5[[5]], predictor = model_slo5_pred_tst)
+
+auc_test_random_value <-auc(auc_test_random)
+auc_test_slo5_value <-auc(auc_test_slo5)
+
+auc_test_values <- data.frame(model = c("random", "slope < 5"), AUC = c(auc_test_random_value, auc_test_slo5_value))
+
 
 #AUC for every fold with training data
 #https://stackoverflow.com/a/69261452/4268720
-auc_random <- sapply(X = unique(model_cal$pred$Resample),
+
+auc_folds <- function(model_cal){
+  sapply(X = unique(model_cal$pred$Resample),
                  FUN = function(x) {
                    r <- model_cal$pred[model_cal$pred$Resample == x,]
                    R <- auc(response = r$obs, predictor = r$Yes)
                    return(R)
                  }, simplify = T) %>%
   enframe() 
+}
+
+auc_folds_rdm = auc_folds(model_cal_rdm) %>% mutate(model = "random")
+auc_folds_slo5 = auc_folds(model_cal_slo5) %>% mutate(model = "slope < 5")
+
+auc_folds_df <- bind_rows(auc_folds_rdm, auc_folds_slo5)
+
+p <- ggplot(auc_folds_df, aes(x=model, y=value)) + 
+  geom_boxplot()+geom_point(data = auc_test_values, aes(x=model, y=AUC))+labs(y="AUC")+theme_bw()
 
 
-model_random_resp_all = predict(model_random, calval_random[[6]], type = "response")
+
+
+###################################
+####Predictions with all data######
+###################################
+
+#For the prediction data are use the calval_random data, because is the total of data
+model_random_resp_all = predict(model_opt_random, calval_random[[6]], type = "response")
+model_slo5_resp_all = predict(model_opt_slo5, calval_random[[6]], type = "response")
+
 
 su_random <- bind_cols(all, data.frame(prob=model_random_resp_all))
+su_slo5 <- bind_cols(all, data.frame(prob=model_slo5_resp_all))
+
 
 ###################
-####all_map########
+####Maps########
 ###################
 
 su_map(st_as_sf(su_random), "prob", 4, "jenks", "-RdYlGn", "XGBoost - random negative samples")
-su_map(st_as_sf(su_map_slo5), "p_slo5", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
+su_map(st_as_sf(su_slo5), "prob", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
 
 
 
