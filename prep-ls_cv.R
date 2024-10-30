@@ -287,7 +287,7 @@ auc_random <- roc(response = calval_random[[5]], predictor = model_random_resp_t
 
 #AUC for every fold with training data
 #https://stackoverflow.com/a/69261452/4268720
-auc_random_ <- sapply(X = unique(model_cal$pred$Resample),
+auc_random <- sapply(X = unique(model_cal$pred$Resample),
                  FUN = function(x) {
                    r <- model_cal$pred[model_cal$pred$Resample == x,]
                    R <- auc(response = r$obs, predictor = r$Yes)
