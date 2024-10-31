@@ -379,7 +379,25 @@ p <- ggplot(auc_folds_df, aes(x=model, y=value)) +
 
 
 #Brier score for every fold with training data
+bs_folds <- function(model_cal){
+  sapply(X = unique(model_cal$pred$Resample),
+         FUN = function(x) {
+           r <- model_cal$pred[model_cal$pred$Resample == x,]
+           R <- BrierScore(x = r$obs, pred = r$Yes)
+           return(R)
+         }, simplify = T) %>%
+    enframe() 
+}
 
+bs_folds_rdm = bs_folds(model_cal_rdm) %>% mutate(model = "random")
+bs_folds_slo5 = bs_folds(model_cal_slo5) %>% mutate(model = "slope < 5")
+bs_folds_md = bs_folds(model_cal_md) %>% mutate(model = "md")
+
+
+bs_folds_df <- bind_rows(bs_folds_rdm, bs_folds_slo5, bs_folds_md)
+
+bs_p <- ggplot(bs_folds_df, aes(x=model, y=value)) + 
+  geom_boxplot()+geom_point(data = auc_test_values, aes(x=model, y=AUC))+labs(y="AUC")+theme_bw()
 
 ###################################
 ####Predictions with all data######
