@@ -4,8 +4,8 @@ library(tidyverse)
 library(sf)
 library(terra)
 library(pROC)
+library(DescTools)
 library(caret)
-library(ROCR)
 library(units)
 library(tmap)
 library(xgboost)
@@ -21,7 +21,7 @@ cluster <- makeCluster(detectCores() - n) #  n is the number of remaining cores;
 registerDoParallel(cluster)
 
 #path to SAGA executable
-#At this time, RSAGA only works with SAGA 8.4.1
+#At this time, RSAGA only works with SAGA no greater than 8.4.1
 env <- rsaga.env(r'(C:\Users\mreyes.AMBIENTE\saga-8.4.1_x64)')
 #env <- rsaga.env(r'(C:\Users\ernes\saga-8.4.1_x64)')
 
@@ -43,7 +43,11 @@ su$frane <- lengths(st_intersects(su, ls_point)) > 0
 su$frane <- as.integer(ifelse(su$frane == "TRUE", 1, 0))
 
 #Plot of su and landslides
-ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.02)+theme_bw() 
+ggplot()+geom_sf(data = su, aes(fill=factor(frane)),linewidth=0.08)+
+  scale_fill_discrete(name = "Independent variable", labels = c("no landslides", "landslides"))+
+  theme_bw(14) 
+
+ggsave("output/ls_su.png", width = 12, height = 6)
 
 # #DEM
 # dem <- rast(paste0("input/continuous/", area, "/els_alos_30m.tif"))
@@ -109,29 +113,61 @@ all_random <- all
 #Selection of negative slope units using median slope < 5°
 all_slo5 <- all %>% dplyr::filter(frane == 1 | (frane == 0 & median.slope <=5))
 
+##Selection of negative slope units using Mahalanobis Distance°
+#Categorical variables are excluded. 
+
+md_vars_ls <- all %>% dplyr::filter(frane==1) %>%
+  dplyr::select(-c(DN, geometry, frane, majority.asp)) 
+
+all_md <- all %>% 
+  mutate(md = mahalanobis(all %>% 
+                            dplyr::select(-c(DN, geometry, frane, majority.asp)), colMeans(md_vars_ls), cov(md_vars_ls)))
+
+cutoff <- qchisq(p = 0.95 , df = ncol(md_vars_ls)-1)
+
+all_md_cut <- all_md %>% dplyr::filter(frane == 1 | (frane == 0 & md>cutoff)) %>% 
+  dplyr::select(-c(md))
+
+# #Mahalanobis distance plot
+# ggplot()+geom_sf(data = st_as_sf(all_md), aes(fill=md),color=NA)+scale_fill_viridis_c()+theme_bw(14)+
+#   labs(title = "Malahalobis distance for slope units")+theme(plot.title.position = "plot")
+# 
+# ggsave("output/md.png", width = 12, height = 6)
+
+ggplot(st_as_sf(all_md)) +
+  geom_sf(aes(fill=md), data = ~ subset(., md < 1000), color=NA) +
+  geom_sf(color = "orange", data = ~ subset(., md >= 1000), size=20) +
+  scale_fill_gradient(low="blue", high="red")+theme_bw(14)+
+  labs(title = "Mahalanobis distance for slope units")+theme(plot.title.position = "plot")
+
+ggsave("output/md.png", width = 12, height = 6)
+
+
+
+
 ##########################
 ######Variable maps######
 ##########################
 
-# map_vars <- function(sf, var){
-#   name <- "var"
-#   titulo <- name
-#   tm <- tm_shape(sf)+
-#     tm_fill(var)+
-#     tm_shape(els_lim)+
-#     tm_borders()
-# }
-# 
-# su_model_sf <- st_as_sf(su_model)
-# 
-# vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
-# map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
-# 
-# varmap1 <- tmap_arrange(map_list[1:4])
-# tmap_save(varmap1, filename = "output/varmap1.png")
-# varmap2 <- tmap_arrange(map_list[5:9])
-# tmap_save(varmap2, filename = "output/varmap2.png")
-# 
+map_vars <- function(sf, var){
+  name <- "var"
+  titulo <- name
+  tm <- tm_shape(sf)+
+    tm_fill(var)+
+    tm_shape(els_lim)+
+    tm_borders()
+}
+
+su_model_sf <- st_as_sf(su_model)
+
+vars_maps <- names(dplyr::select(su_model, -c(DN, frane, geometry)))
+map_list <- pmap(list(list(su_model_sf), vars_maps), map_vars)
+
+varmap1 <- tmap_arrange(map_list[1:4])
+tmap_save(varmap1, filename = "output/varmap1.png")
+varmap2 <- tmap_arrange(map_list[5:9])
+tmap_save(varmap2, filename = "output/varmap2.png")
+
 
 ################################
 #Variable plots
@@ -181,6 +217,7 @@ cal_val <- function(df, per){
 
 calval_random <- cal_val(all_random, 0.7)
 calval_slo5 <- cal_val(all_slo5, 0.7)
+calval_md <- cal_val(all_md_cut, 0.7)
 
 #######################
 ##Plots samples########
@@ -203,11 +240,13 @@ su_map <- function(sf, var, n, style, palette, title){
       outer.margins = 0,
       frame.lwd = 0.2
     )
-  return(tm)
+  #return(tm)
+  tmap_save(tm=tm, filename=paste0("output/", title, ".png"))
 }
 
 su_map(st_as_sf(calval_random[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - random negative samples" )
-su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - slope < 5" )
+su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - slope less than 5" )
+su_map(st_as_sf(calval_md[[3]]), "frane", 2,"cat", "-RdYlGn", "Mahalanobis distance" )
 
 
 #####################
@@ -257,6 +296,8 @@ tuned_model <- function(X_train, Y_train){
 
 model_cal_rdm <- tuned_model(calval_random[[1]], calval_random[[2]])
 model_cal_slo5 <- tuned_model(calval_slo5[[1]], calval_slo5[[2]])
+model_cal_md <- tuned_model(calval_md[[1]], calval_md[[2]])
+
 
 stopCluster(cluster)
 
@@ -290,20 +331,27 @@ xgboost(
 
 model_opt_random <- model_opt(calval_random, model_cal_rdm)
 model_opt_slo5 <- model_opt(calval_slo5, model_cal_slo5)
+model_opt_md <- model_opt(calval_md, model_cal_md)
+
 
 #Predictions with test data
 model_random_pred_tst = predict(model_opt_random, calval_random[[4]], type = "response")
 model_slo5_pred_tst = predict(model_opt_slo5, calval_slo5[[4]], type = "response")
+model_md_pred_tst = predict(model_opt_md, calval_md[[4]], type = "response")
 
 
 #AUC test data
 auc_test_random <- roc(response = calval_random[[5]], predictor = model_random_pred_tst)
 auc_test_slo5 <- roc(response = calval_slo5[[5]], predictor = model_slo5_pred_tst)
+auc_test_md <- roc(response = calval_md[[5]], predictor = model_md_pred_tst)
+
 
 auc_test_random_value <-auc(auc_test_random)
 auc_test_slo5_value <-auc(auc_test_slo5)
+auc_test_md_value <-auc(auc_test_md)
 
-auc_test_values <- data.frame(model = c("random", "slope < 5"), AUC = c(auc_test_random_value, auc_test_slo5_value))
+
+auc_test_values <- data.frame(model = c("random", "slope < 5", "md"), AUC = c(auc_test_random_value, auc_test_slo5_value, auc_test_md_value))
 
 
 #AUC for every fold with training data
@@ -321,13 +369,16 @@ auc_folds <- function(model_cal){
 
 auc_folds_rdm = auc_folds(model_cal_rdm) %>% mutate(model = "random")
 auc_folds_slo5 = auc_folds(model_cal_slo5) %>% mutate(model = "slope < 5")
+auc_folds_md = auc_folds(model_cal_md) %>% mutate(model = "md")
 
-auc_folds_df <- bind_rows(auc_folds_rdm, auc_folds_slo5)
+
+auc_folds_df <- bind_rows(auc_folds_rdm, auc_folds_slo5, auc_folds_md)
 
 p <- ggplot(auc_folds_df, aes(x=model, y=value)) + 
   geom_boxplot()+geom_point(data = auc_test_values, aes(x=model, y=AUC))+labs(y="AUC")+theme_bw()
 
 
+#Brier score for every fold with training data
 
 
 ###################################
@@ -337,10 +388,12 @@ p <- ggplot(auc_folds_df, aes(x=model, y=value)) +
 #For the prediction data are use the calval_random data, because is the total of data
 model_random_resp_all = predict(model_opt_random, calval_random[[6]], type = "response")
 model_slo5_resp_all = predict(model_opt_slo5, calval_random[[6]], type = "response")
+model_md_resp_all = predict(model_opt_md, calval_random[[6]], type = "response")
 
 
 su_random <- bind_cols(all, data.frame(prob=model_random_resp_all))
 su_slo5 <- bind_cols(all, data.frame(prob=model_slo5_resp_all))
+su_md <- bind_cols(all, data.frame(prob=model_md_resp_all))
 
 
 ###################
@@ -349,6 +402,7 @@ su_slo5 <- bind_cols(all, data.frame(prob=model_slo5_resp_all))
 
 su_map(st_as_sf(su_random), "prob", 4, "jenks", "-RdYlGn", "XGBoost - random negative samples")
 su_map(st_as_sf(su_slo5), "prob", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
+su_map(st_as_sf(su_md), "prob", 4, "jenks", "-RdYlGn", "XGBoost - Mahalanobis distance")
 
 
 
