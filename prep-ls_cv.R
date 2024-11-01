@@ -100,7 +100,6 @@ su_model <- data.frame(cbind(su, su_vars_cont, su_vars_disc))
 
 all<-data.frame(su_model)
 
-
 #Removes NoData Values
 all=na.exclude(all)
 rownames(all) <- NULL
@@ -128,6 +127,9 @@ cutoff <- qchisq(p = 0.95 , df = ncol(md_vars_ls)-1)
 all_md_cut <- all_md %>% dplyr::filter(frane == 1 | (frane == 0 & md>cutoff)) %>% 
   dplyr::select(-c(md))
 
+#Random selection of negative slope units
+all_random_no_slope <- all_slo5 %>% dplyr::select(-c(median.slope, stdev.slope))
+
 # #Mahalanobis distance plot
 # ggplot()+geom_sf(data = st_as_sf(all_md), aes(fill=md),color=NA)+scale_fill_viridis_c()+theme_bw(14)+
 #   labs(title = "Malahalobis distance for slope units")+theme(plot.title.position = "plot")
@@ -141,9 +143,6 @@ ggplot(st_as_sf(all_md)) +
   labs(title = "Mahalanobis distance for slope units")+theme(plot.title.position = "plot")
 
 ggsave("output/md.png", width = 12, height = 6)
-
-
-
 
 ##########################
 ######Variable maps######
@@ -218,6 +217,9 @@ cal_val <- function(df, per){
 calval_random <- cal_val(all_random, 0.7)
 calval_slo5 <- cal_val(all_slo5, 0.7)
 calval_md <- cal_val(all_md_cut, 0.7)
+calval_random_no_slope <- cal_val(all_random_no_slope, 0.7)
+
+calval_random_no_slp_tst <- cal_val(all_random %>% dplyr::select(-c(median.slope, stdev.slope)), 0.7)
 
 #######################
 ##Plots samples########
@@ -244,10 +246,10 @@ su_map <- function(sf, var, n, style, palette, title){
   tmap_save(tm=tm, filename=paste0("output/", title, ".png"))
 }
 
-su_map(st_as_sf(calval_random[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - random negative samples" )
-su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost - slope less than 5" )
-su_map(st_as_sf(calval_md[[3]]), "frane", 2,"cat", "-RdYlGn", "Mahalanobis distance" )
-
+su_map(st_as_sf(calval_random[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost-random negative samples")
+su_map(st_as_sf(calval_slo5[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost-slope less than 5" )
+su_map(st_as_sf(calval_md[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost-Mahalanobis distance" )
+su_map(st_as_sf(calval_random_no_slope[[3]]), "frane", 2,"cat", "-RdYlGn", "XGBoost-random negative samples no slope")
 
 #####################
 ####Modeling#########
@@ -297,7 +299,7 @@ tuned_model <- function(X_train, Y_train){
 model_cal_rdm <- tuned_model(calval_random[[1]], calval_random[[2]])
 model_cal_slo5 <- tuned_model(calval_slo5[[1]], calval_slo5[[2]])
 model_cal_md <- tuned_model(calval_md[[1]], calval_md[[2]])
-
+model_cal_no_slope <- tuned_model(calval_random_no_slope[[1]], calval_random_no_slope[[2]])
 
 stopCluster(cluster)
 
@@ -332,26 +334,28 @@ xgboost(
 model_opt_random <- model_opt(calval_random, model_cal_rdm)
 model_opt_slo5 <- model_opt(calval_slo5, model_cal_slo5)
 model_opt_md <- model_opt(calval_md, model_cal_md)
-
+model_opt_no_slope <- model_opt(calval_random_no_slope, model_cal_no_slope)
 
 #Predictions with test data
 model_random_pred_tst = predict(model_opt_random, calval_random[[4]], type = "response")
 model_slo5_pred_tst = predict(model_opt_slo5, calval_slo5[[4]], type = "response")
 model_md_pred_tst = predict(model_opt_md, calval_md[[4]], type = "response")
-
+model_random_no_slp_pred_tst = predict(model_opt_no_slope, calval_random_no_slope[[4]], type = "response")
 
 #AUC test data
 auc_test_random <- roc(response = calval_random[[5]], predictor = model_random_pred_tst)
 auc_test_slo5 <- roc(response = calval_slo5[[5]], predictor = model_slo5_pred_tst)
 auc_test_md <- roc(response = calval_md[[5]], predictor = model_md_pred_tst)
-
+auc_test_random_no_slp <- roc(response = calval_random_no_slope[[5]], predictor = model_random_no_slp_pred_tst)
 
 auc_test_random_value <-auc(auc_test_random)
 auc_test_slo5_value <-auc(auc_test_slo5)
 auc_test_md_value <-auc(auc_test_md)
+auc_test_random_no_slp_value <-auc(auc_test_random_no_slp)
 
 
-auc_test_values <- data.frame(model = c("random", "slope < 5", "md"), AUC = c(auc_test_random_value, auc_test_slo5_value, auc_test_md_value))
+auc_test_values <- data.frame(model = c("random", "slope < 5", "md", "random no slp"), 
+                              AUC = c(auc_test_random_value, auc_test_slo5_value, auc_test_md_value, auc_test_random_no_slp_value))
 
 
 #AUC for every fold with training data
@@ -370,20 +374,33 @@ auc_folds <- function(model_cal){
 auc_folds_rdm = auc_folds(model_cal_rdm) %>% mutate(model = "random")
 auc_folds_slo5 = auc_folds(model_cal_slo5) %>% mutate(model = "slope < 5")
 auc_folds_md = auc_folds(model_cal_md) %>% mutate(model = "md")
+auc_folds_rdm_no_slp = auc_folds(model_cal_no_slope) %>% mutate(model = "random no slp")
 
 
-auc_folds_df <- bind_rows(auc_folds_rdm, auc_folds_slo5, auc_folds_md)
+auc_folds_df <- bind_rows(auc_folds_rdm, auc_folds_slo5, auc_folds_md, auc_folds_rdm_no_slp)
 
-p <- ggplot(auc_folds_df, aes(x=model, y=value)) + 
-  geom_boxplot()+geom_point(data = auc_test_values, aes(x=model, y=AUC))+labs(y="AUC")+theme_bw()
+auc_p <- ggplot(auc_folds_df, aes(x=model, y=value)) + 
+  geom_boxplot()+geom_point(data = auc_test_values, aes(x=model, y=AUC), color="red")+
+  labs(y="AUC", title = "Area under the curve")+theme_bw()+
+  theme(plot.title.position = "plot")
 
+
+#Brier score test data
+bs_test_random <- BrierScore(x = calval_random[[5]], pred = model_random_pred_tst)
+bs_test_slo5 <- BrierScore(x = calval_random[[5]], pred = model_slo5_pred_tst)
+bs_test_md <- BrierScore(x = calval_random[[5]], pred = model_md_pred_tst)
+bs_test_random_no_slp <- BrierScore(x = calval_random_no_slope[[5]], pred = model_random_no_slp_pred_tst)
+
+
+bs_test_values <- data.frame(model = c("random", "slope < 5", "md", "random no slp"), 
+                             BS = c(bs_test_random, bs_test_slo5, bs_test_md, bs_test_random_no_slp))
 
 #Brier score for every fold with training data
 bs_folds <- function(model_cal){
   sapply(X = unique(model_cal$pred$Resample),
          FUN = function(x) {
            r <- model_cal$pred[model_cal$pred$Resample == x,]
-           R <- BrierScore(x = r$obs, pred = r$Yes)
+           R <- BrierScore(x = ifelse(r$obs == "Yes", 1, 0), pred = r$Yes)
            return(R)
          }, simplify = T) %>%
     enframe() 
@@ -392,12 +409,15 @@ bs_folds <- function(model_cal){
 bs_folds_rdm = bs_folds(model_cal_rdm) %>% mutate(model = "random")
 bs_folds_slo5 = bs_folds(model_cal_slo5) %>% mutate(model = "slope < 5")
 bs_folds_md = bs_folds(model_cal_md) %>% mutate(model = "md")
+bs_folds_rdm_no_slp = bs_folds(model_cal_no_slope) %>% mutate(model = "random no slp")
 
 
-bs_folds_df <- bind_rows(bs_folds_rdm, bs_folds_slo5, bs_folds_md)
+bs_folds_df <- bind_rows(bs_folds_rdm, bs_folds_slo5, bs_folds_md, bs_folds_rdm_no_slp)
 
-bs_p <- ggplot(bs_folds_df, aes(x=model, y=value)) + 
-  geom_boxplot()+geom_point(data = auc_test_values, aes(x=model, y=AUC))+labs(y="AUC")+theme_bw()
+bs_p <- ggplot(bs_folds_df, aes(x=model, y=value))+ 
+  geom_boxplot()+geom_point(data = bs_test_values, aes(x=model, y=BS), color="red")+
+  labs(y="Brier score", title = "Brier score")+theme_bw()+
+  theme(plot.title.position = "plot")
 
 ###################################
 ####Predictions with all data######
@@ -407,20 +427,22 @@ bs_p <- ggplot(bs_folds_df, aes(x=model, y=value)) +
 model_random_resp_all = predict(model_opt_random, calval_random[[6]], type = "response")
 model_slo5_resp_all = predict(model_opt_slo5, calval_random[[6]], type = "response")
 model_md_resp_all = predict(model_opt_md, calval_random[[6]], type = "response")
-
+model_random_no_slp_resp_all = predict(model_opt_no_slope, calval_random_no_slp_tst[[6]], type = "response")
 
 su_random <- bind_cols(all, data.frame(prob=model_random_resp_all))
 su_slo5 <- bind_cols(all, data.frame(prob=model_slo5_resp_all))
 su_md <- bind_cols(all, data.frame(prob=model_md_resp_all))
-
+su_random_no_slp <- bind_cols(all, data.frame(prob=model_random_no_slp_resp_all))
 
 ###################
 ####Maps########
 ###################
 
 su_map(st_as_sf(su_random), "prob", 4, "jenks", "-RdYlGn", "XGBoost - random negative samples")
-su_map(st_as_sf(su_slo5), "prob", 4, "jenks", "-RdYlGn", "XGBoost - samples slo<5")
+su_map(st_as_sf(su_slo5), "prob", 4, "jenks", "-RdYlGn", "XGBoost - samples slope less than 5")
 su_map(st_as_sf(su_md), "prob", 4, "jenks", "-RdYlGn", "XGBoost - Mahalanobis distance")
+su_map(st_as_sf(su_random_no_slp), "prob", 4, "jenks", "-RdYlGn", "XGBoost - random negative samples no slope")
+
 
 
 
